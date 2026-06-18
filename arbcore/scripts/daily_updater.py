@@ -149,7 +149,7 @@ class DailyUpdater(BaseApp):
     def step1_and_2_fetch_woody_api(self):
         """
         步骤一 & 二：获取 Woody 数据并解析入库
-        实施“安全第一”防御机制：VPS(增量追溯) -> API -> Crawler -> Stop on Failure
+        实施"安全第一"防御机制：VPS(增量追溯) -> API -> Crawler -> Stop on Failure
         """
         self.logger.info("=== 步骤一：获取 Woody 数据，步骤二：解析入库 (增量追溯模式) ===")
         today_str = datetime.now().strftime('%Y-%m-%d')
@@ -159,6 +159,22 @@ class DailyUpdater(BaseApp):
         if self.db.is_access_synced_today(today_str, sync_key):
             self.logger.info(f"✅ 今日 Woody 因子已处理完毕（防刷标记 {sync_key} 已存在），跳过 VPS 同步与 API 请求。")
             return True
+
+        # 🛡️ 数据库检查：如果库里已有今天的 Woody 因子数据，无需连 VPS
+        try:
+            conn = self.db._get_conn()
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM raw_api_data WHERE date = ? AND source = 'woody_lof'",
+                (today_str,)
+            )
+            count = cursor.fetchone()[0]
+            conn.close()
+            if count > 0:
+                self.logger.info(f"✅ 今日({today_str}) Woody 原始数据已在库中({count}条)，无需连VPS，直接标记完成。")
+                self.db.mark_access_synced(today_str, sync_key)
+                return True
+        except Exception as e:
+            self.logger.warning(f"检查 Woody 数据库时出错: {e}，继续连接VPS获取")
 
         codes = [str(fund.get('code', '')) for fund in self.config.get('funds', []) if str(fund.get('code', '')) != '161226']
         backup_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "woodyAPI")
@@ -328,6 +344,22 @@ class DailyUpdater(BaseApp):
         self.logger.info("=== 步骤三：抓取汇率（人民币中间价） ===")
         today_str = datetime.now().strftime('%Y-%m-%d')
 
+        # 🛡️ 数据库检查：如果库里已有今天的汇率数据，无需连 VPS
+        try:
+            conn = self.db._get_conn()
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM exchange_rate WHERE date = ? AND usd_cny_mid IS NOT NULL",
+                (today_str,)
+            )
+            count = cursor.fetchone()[0]
+            conn.close()
+            if count > 0:
+                self.logger.info(f"✅ 今日({today_str})汇率已在库中，无需连VPS，直接跳过。")
+                self.db.mark_access_synced(today_str, source='official_exchange_rate')
+                return
+        except Exception as e:
+            self.logger.warning(f"检查汇率数据库时出错: {e}，继续连接VPS获取")
+
         # Level 0: 尝试从 VPS 增量同步汇率数据并入库
         vps_fx_data = self._try_sync_all_from_vps('fx')
         if vps_fx_data:
@@ -418,8 +450,14 @@ class DailyUpdater(BaseApp):
         today_str = datetime.now().strftime('%Y-%m-%d')
         current_hour = datetime.now().hour
 
-        for fund in self.config.get('funds', []):
-            code = str(fund.get('code', ''))
+        # 从大一统基金列表获取所有基金代码（覆盖 QDII亚洲/国内LOF/债券货币等 lof_config.yaml 未收录的品种）
+        conn_ufl = self.db._get_conn()
+        all_fund_rows = conn_ufl.execute("SELECT fund_code FROM unified_fund_list").fetchall()
+        conn_ufl.close()
+        all_codes = [str(r[0]) for r in all_fund_rows if r[0]]
+        self.logger.info(f"📋 unified_fund_list 共 {len(all_codes)} 只基金，开始遍历净值/价格同步...")
+
+        for code in all_codes:
             if not code: continue
                 
             # --- 1. 获取收盘价 (Sina) ---
@@ -480,13 +518,18 @@ class DailyUpdater(BaseApp):
         self.logger.info("=== 步骤五：抓取海外及指数市场交易数据 (标准库模式) ===")
         today_str = datetime.now().strftime('%Y-%m-%d')
         start_date = (datetime.now() - timedelta(days=15)).strftime('%Y-%m-%d')
-        
+
+        # access_sync_status 防刷：今天已跑过步骤五就跳过
+        if self.db.is_access_synced_today(today_str, source='usa_etf_data'):
+            self.logger.info("⏭️ [海外/指数] 今日已抓取，跳过步骤五")
+            return
+
         symbols = set()
         for fund in self.config.get('funds', []):
             for item in fund.get('valuation_portfolio', []) + fund.get('hedging_portfolio', []):
                 sym = str(item.get('symbol', '')).replace('^', '').split('-')[0]
                 if sym and not sym.isdigit(): symbols.add(sym)
-                
+
         for sym in symbols:
             df = self.hist_manager.get_prices(sym, source="sina", start_date=start_date)
             if not df.empty:
@@ -494,12 +537,14 @@ class DailyUpdater(BaseApp):
                     date_str = row['date'].strftime('%Y-%m-%d')
                     self.db.upsert_usa_etf_price(date=date_str, symbol=sym, price=row['close'])
                     # 同步更新大一统表中的指数价格
-                    # 查找哪些基金使用了这个 sym 作为指数
                     for fund in self.config.get('funds', []):
                         for item in fund.get('valuation_portfolio', []) + fund.get('hedging_portfolio', []):
                             if sym in str(item.get('symbol', '')):
                                 self.db.save_unified_history(date_str=date_str, fund_code=fund['code'], index_close=row['close'])
                 self.logger.info(f"✅ [海外/指数] {sym} 行情同步完成")
+
+        self.db.mark_access_synced(today_str, source='usa_etf_data')
+        self.logger.info(f"✅ [海外/指数] 步骤五完成，已标记防刷")
 
     def step6_fetch_woody_regional_etfs(self):
         """步骤六：抓取 Woody 特有的区域变种虚拟 ETF (如 ^GLD-EU) 历史行情"""
@@ -705,47 +750,43 @@ class DailyUpdater(BaseApp):
             self.logger.error("❌ [本地兜底] 获取期货数据失败。")
 
     def step9_fetch_jsl_shares_from_vps(self):
-        """步骤九：从VPS同步深交所场内份额数据"""
-        self.logger.info("=== 步骤九：从VPS同步深交所场内份额数据 ===")
+        """步骤九：从VPS同步场内份额数据（含深交所+上交所）"""
+        self.logger.info("=== 步骤九：从VPS同步场内份额数据 ===")
         today_str = datetime.now().strftime('%Y-%m-%d')
-        
-        # 份额通常是 T-1 日的数据，但它是每天采集的，所以标记为当天已同步
-        if self.db.is_access_synced_today(today_str, source='jsl_shares_data'):
-            self.logger.info("✅ 今日已同步过场内份额数据，跳过。")
-            return
-            
+
         vps_shares_data = self._try_sync_all_from_vps('shares')
-        vps_today_success = False
+        processed_count = 0
+        skipped_count = 0
         
         if vps_shares_data:
-            self.logger.info(f"🔄 [VPS] 发现 {len(vps_shares_data)} 份历史份额数据，正在同步入库...")
+            self.logger.info(f"🔄 [VPS] 发现 {len(vps_shares_data)} 份份额数据文件，正在逐日检查...")
             for item in vps_shares_data:
                 file_date = item['date']
                 content = item['content']
+                
+                # 总是处理每个文件（save_unified_history 使用 UPSERT，安全幂等）
+                # 即使 DB 已有部分数据，VPS 文件可能包含更多基金（如扩展 symbols 后）
                 try:
-                    # 假设文件内容是 {"162411": 12345.67, "161129": 2345.67}
                     count = 0
                     for fund_code_raw, shares in content.items():
                         if shares is not None:
-                            # 份额是 T-1 日的（如果是今天早上6点采集，那就是昨天收盘后的数据）
-                            # 因此写入历史表时，最好对齐到 file_date 作为基准日
                             # 去掉 sh/sz 前缀，保持 fund_code 统一的 6 位数字格式
                             clean_code = fund_code_raw.lower().replace('sh', '').replace('sz', '')
                             self.db.save_unified_history(date_str=file_date, fund_code=clean_code, shares=shares)
                             count += 1
                     
-                    self.logger.info(f"   ✅ [VPS] 同步入库份额数据: {file_date} ({count} 个品种)")
-                    self.db.mark_access_synced(file_date, 'shares_vps_sync')
-                    if file_date >= today_str:
-                        vps_today_success = True
+                    self.logger.info(f"   ✅ [VPS] 入库份额数据: {file_date} ({count} 个品种)")
+                    processed_count += 1
                 except Exception as e:
                     self.logger.error(f"   ❌ [VPS] 解析日期 {file_date} 份额数据时出错: {e}")
 
-        if vps_today_success:
-            self.db.mark_access_synced(today_str, source='jsl_shares_data')
-            self.logger.info("✅ [VPS] 今日场内份额数据同步完成！")
+            self.logger.info(f"✅ [VPS] 份额同步完成: 处理 {processed_count} 天, 跳过 {skipped_count} 天")
+            
+            # 标记今日已同步（防止其他入口重复触发）
+            if any(item['date'] >= today_str for item in vps_shares_data):
+                self.db.mark_access_synced(today_str, source='jsl_shares_data')
         else:
-            self.logger.warning("⚠️ [VPS] 未获取到今日场内份额数据 (可能VPS采集失败或今天非交易日)。")
+            self.logger.warning("⚠️ [VPS] 未获取到份额数据 (可能VPS采集失败或网络问题)")
 
     def _step10_calculate_static_valuation(self):
         """步骤十：基于同步后的因子数据，计算所有基金的静态估值 (static_val)"""

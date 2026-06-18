@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import socket
+import threading
 
 # Ensure LOFarb directory is in sys.path so we can find account_private.py when imported from elsewhere
 _tm_dir = os.path.dirname(os.path.abspath(__file__))
@@ -38,7 +39,8 @@ class TradeManager:
 
         # 启动时自动初始化可用通道
         self._init_tdx()
-        self._init_guojin_qmt()
+        # [V9.1] 国金QMT初始化放后台线程，不阻塞 uvicorn 启动
+        threading.Thread(target=self._init_guojin_qmt, daemon=True).start()
 
     def _init_tdx(self):
         try:
@@ -66,7 +68,7 @@ class TradeManager:
             
             if self.tdx_account_id and self.tdx_account_id > 0:
                 self.tdx_available = True
-                logger.info(f"[TradeManager] 已挂载【通达信】交易通道 (账户句柄: {self.tdx_account_id})")
+                logger.info(f"{'='*50}\n[TradeManager] 已挂载【通达信】交易通道 (账户句柄: {self.tdx_account_id})\n{'='*50}")
             else:
                 logger.warning("[TradeManager] 通达信账户句柄获取失败")
                 
