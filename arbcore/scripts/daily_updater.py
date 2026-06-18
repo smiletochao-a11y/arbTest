@@ -855,8 +855,53 @@ class DailyUpdater(BaseApp):
 
 if __name__ == "__main__":
     import argparse
+    import subprocess
+
     parser = argparse.ArgumentParser(description="ArbNext 日度数据流水线")
     parser.add_argument("--nav-only", action="store_true", help="仅更新基金净值 (step4)")
     parser.add_argument("--refresh-morning", action="store_true", help="清除上午标记后重新抓取 Woody/汇率/VPS")
     args = parser.parse_args()
-    DailyUpdater().run(nav_only=args.nav_only, refresh_morning=args.refresh_morning)
+
+    # 进程互斥锁（跨平台）：用 PID 文件防多实例
+    lock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "daily_updater.lock")
+
+    def _is_pid_alive(pid):
+        try:
+            if os.name == 'nt':
+                result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'], capture_output=True, text=True, timeout=5)
+                return str(pid) in result.stdout
+            else:
+                os.kill(pid, 0)
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    locked = False
+    try:
+        with open(lock_path, 'x') as f:
+            f.write(str(os.getpid()))
+        locked = True
+    except FileExistsError:
+        try:
+            with open(lock_path, 'r') as f:
+                old_pid = int(f.read().strip())
+            if _is_pid_alive(old_pid):
+                print(f"[SKIP] 另一个 daily_updater 实例正在运行 (PID {old_pid})，退出。")
+                sys.exit(0)
+            # 旧进程已死，抢锁
+            with open(lock_path, 'w') as f:
+                f.write(str(os.getpid()))
+            locked = True
+        except (ValueError, FileNotFoundError):
+            with open(lock_path, 'w') as f:
+                f.write(str(os.getpid()))
+            locked = True
+
+    try:
+        DailyUpdater().run(nav_only=args.nav_only, refresh_morning=args.refresh_morning)
+    finally:
+        if locked:
+            try:
+                os.remove(lock_path)
+            except OSError:
+                pass
