@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>移仓决策台 · Optarb</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#fff; --line:#e4e7ec; --txt:#1f2329; --dim:#8a9099;
+    --up:#d92b2b; --down:#0a9e4a; --accent:#2b6cb0; --warn:#c8871a; --soft:#f8f9fb;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1240px;margin:0 auto;padding:16px 20px 60px}
+  a{color:var(--accent)}
+  .nav{display:flex;gap:8px;margin-bottom:14px}
+  .nav a{font-size:13px;text-decoration:none;color:var(--dim);padding:6px 14px;
+         border:1px solid var(--line);border-radius:8px;background:#fff}
+  .nav a.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+  .head{display:flex;align-items:center;gap:14px;margin-bottom:14px;flex-wrap:wrap}
+  .head h1{font-size:20px;margin:0;font-weight:650}
+  .head .sp{flex:1}
+  select{font:inherit;font-size:13px;padding:6px 10px;border:1px solid var(--line);
+         border-radius:8px;background:#fff;color:var(--txt);cursor:pointer}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+        padding:16px 18px;margin-bottom:14px}
+  .card h2{font-size:14px;margin:0 0 14px;font-weight:650;display:flex;
+           align-items:center;gap:10px}
+  .card h2 .sub{font-weight:400;color:var(--dim);font-size:12.5px}
+  .tag{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:6px;
+       background:#eef2f7;color:#5b6472}
+  /* 非盘中提示（休市/午休/盘前）：琥珀色 */
+  .tag.amber{background:#fef3c7;color:#92400e}
+  /* 顶部「今天几号 / 行情几点的」——原先整页没有时间标记，用户看不出数据是陈的 */
+  .nowline{font-size:12.5px;color:#5b6472;display:inline-flex;align-items:center;gap:3px;
+           flex-wrap:wrap}
+  .nowline b{color:var(--txt);font-weight:650}
+  .nowline .dim{color:var(--dim);font-weight:400}
+  .nowline .stale{color:#c8871a;font-weight:600;margin-left:4px}
+  /* 「更新数据」按钮（2026-09-28 东哥要，替代额外的 bat） */
+  .upd{font:inherit;font-size:13px;padding:6px 14px;border:1px solid #c9d4e6;
+       border-radius:8px;background:#fff;color:#1f6feb;cursor:pointer;font-weight:600}
+  .upd:hover:not(:disabled){background:#f0f6ff}
+  .upd:disabled{cursor:default;color:#8a9099;border-color:var(--line);background:#fff}
+  .upd.busy{color:#c8871a;border-color:#f0d9a8;background:#fffbf2}
+  .upd.done{color:#1a9c5b;border-color:#bfe3cf;background:#f4fbf7}
+  .updmsg{font-size:11.5px;color:#1a9c5b}
+  .updmsg.bad{color:#d94a4a}
+  /* ---- 实时决策 ----
+     左列宽度是**实测定的**，不是拍的：12.5px 字号下
+       「历史 12 个月的 T-10 窗口：均值 155.7 · 中位 154.4」= 278px
+       「当前处于 50% 分位（共 12 个历史样本）」          = 226px
+     两段并成一行 ≈ 516px，加 .big 左右 padding 28px → 左列至少 544px。
+     取 570px 留余量，右列仍有 576px（meta 一行需要 ~559px）。 */
+  .livecard{padding:13px 18px 14px}
+  .livecard h2{margin-bottom:9px}
+  .live{display:grid;grid-template-columns:570px 1fr;gap:16px;align-items:start}
+  .live .big{background:var(--soft);border:1px solid var(--line);border-radius:12px;
+             padding:11px 14px;text-align:center}
+  .live .big .lab{font-size:12.5px;color:var(--dim);margin-bottom:1px}
+  .live .big .val{font-size:36px;font-weight:700;letter-spacing:-1.5px;line-height:1.08}
+  .live .big .val .u{font-size:14px;font-weight:500;color:var(--dim);letter-spacing:0}
+  .live .big .sub{font-size:12px;color:var(--dim);margin-top:2px;line-height:1.5}
+  /* 判灯取值档位提示（见 docs/005 §7.4）：与上一行拉开一点，并用暖色强调，
+     避免读者拿大字的平值档去对判灯、结果对不上。 */
+  .live .big .sub.jref{color:#8a6320;margin-top:4px}
+  .live .big .cmp{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);
+                  font-size:12.5px;color:#5b6472;line-height:1.5}
+  .light{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+  .light.green{background:#0a9e4a}.light.yellow{background:#e0a020}.light.red{background:#d92b2b}
+  .light.gray{background:#b8bec7}
+  .verdict{font-size:21px;font-weight:700;margin-bottom:3px;line-height:1.25}
+  .reasons{margin:0;padding-left:18px;color:#4a5058;font-size:13px;line-height:1.5}
+  .reasons li{margin-bottom:0}
+  /* 参数条紧跟在判灯标题后面（原来是压在①区最底部，白占一行高度） */
+  .meta{display:flex;flex-wrap:wrap;gap:2px 16px;margin:12px 0 5px;font-size:12.5px;
+        color:var(--dim);line-height:1.6}
+  .meta b{color:var(--txt);font-weight:600}
+  .meta b.hot{color:#d92b2b;font-weight:700}
+  /* ---- 控件 ---- */
+  .ctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .ctl .lb{font-size:12.5px;color:var(--dim);margin-right:2px}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff}
+  .seg button{font:inherit;font-size:12.5px;padding:5px 12px;border:none;background:transparent;
+              color:#5b6472;cursor:pointer;border-right:1px solid var(--line)}
+  .seg button:last-child{border-right:none}
+  .seg button.on{background:var(--accent);color:#fff;font-weight:500}
+  .seg button:hover:not(.on){background:var(--soft)}
+  /* ★ 2026-09-28：「今天是 T-几」的提示与标记（东哥首次实盘没看懂该点哪个） */
+  .ctl .todaytip{font-size:11.5px;color:#1f6feb;font-weight:600;margin-right:-2px}
+  .seg button .dot{display:inline-block;width:5px;height:5px;border-radius:50%;
+                   background:#1f6feb;margin-left:3px;vertical-align:middle}
+  .seg button.on .dot{background:#fff}
+  /* 警告里的「一键切到今天的 T」按钮 */
+  .jump{font:inherit;font-size:11.5px;padding:2px 10px;margin-left:6px;border:1px solid #f0d9a8;
+        border-radius:6px;background:#fffbf2;color:#c8871a;cursor:pointer;font-weight:600}
+  .jump:hover{background:#fff3dd}
+  /* ---- 指标卡 ---- */
+  .kpihead{font-size:12.5px;color:var(--dim);margin:2px 0 8px}
+  .kpihead .dim{color:#a7adb6}
+  .subhead{display:flex;align-items:baseline;gap:12px;margin:22px 0 8px}
+  .subhead .lb{font-size:13.5px;font-weight:600;color:var(--txt)}
+  .subhead .dim{font-size:12px;color:var(--dim)}
+  .subhead .dim b{color:#5b6472}
+  .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px}
+  .kpi{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+  .kpi .lab{font-size:12px;color:var(--dim);margin-bottom:3px;white-space:nowrap}
+  .kpi .val{font-size:19px;font-weight:650;letter-spacing:-.4px}
+  .kpi .val small{font-size:12px;font-weight:500;color:var(--dim);margin-left:2px}
+  /* ---- 表格 ---- */
+  table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+  th,td{padding:7px 8px;text-align:right;border-bottom:1px solid #f0f1f4;white-space:nowrap}
+  th{color:var(--dim);font-weight:500;font-size:12px;text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  tr.hi td{background:#fff8e6}
+  tr.pick td{background:#eef6ff;font-weight:600}
+  .up{color:var(--up)} .down{color:var(--down)} .dim{color:var(--dim)}
+  .pill{display:inline-block;font-size:11px;padding:1px 7px;border-radius:20px;
+        background:#eef2f7;color:#5b6472}
+  .pill.itm{background:#fdecec;color:#c0392b}
+  .pill.ok{background:#e7f6ed;color:#0a7a41}
+  .pill.bad{background:#fdecec;color:#c0392b}
+  .note{font-size:12px;color:var(--dim);line-height:1.8;margin-top:12px}
+  .err{color:#c0392b;font-size:13px;padding:12px;background:#fdecec;border-radius:8px}
+  .empty{padding:30px;text-align:center;color:var(--dim);font-size:13px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:1000px){.kpis{grid-template-columns:repeat(3,1fr)}.live{grid-template-columns:1fr}.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div id="app" class="wrap">
+
+  <div class="nav">
+    <a :href="hrefOf('option')">持仓体检</a>
+    <a :href="hrefOf('option-daily')">卖沽移仓价差（日报）</a>
+    <a class="on" :href="hrefOf('option-risk')">移仓决策台</a>
+    <a :href="hrefOf('option-entry')">入场判断</a>
+  </div>
+
+  <div class="head">
+    <h1>移仓决策台</h1>
+    <span class="tag">交割日窗口 × 实时价差</span>
+    <!-- ★ 2026-09-28 加：页面必须显示「今天是几号、行情是哪一刻的」。
+         踩坑：原先整页没有任何时间标记，大跌当天还在用上一交易日的现货定平值，
+         用户完全看不出数据是陈的。 -->
+    <span class="nowline">
+      <b>{{ todayLabel }}</b>
+      <template v-if="L && L.ok && L.spot">
+        <span class="dim">· 现货</span> <b>{{ f1(L.spot) }}</b>
+        <template v-if="L.spot_time"><span class="dim">（行情 {{ (L.spot_time||'').slice(11,16) || L.spot_time }}）</span></template>
+        <span v-if="L.spot_source==='db_close'" class="stale">⚠ 实时取不到，用库内 {{ L.spot_time }} 收盘价</span>
+      </template>
+      <span class="dim">· 刷新 {{ clock }}</span>
+    </span>
+    <!-- 非盘中：后端按市场状态拉长行情缓存（周末/假期缓存到下次开市），
+         这里必须说明「看到的是最近一次收盘」，避免被当成实时价 -->
+    <span v-if="MKT && !MKT.is_live" class="tag amber">{{ mktText }}</span>
+    <span class="sp"></span>
+    <select v-model="variety" @change="reload">
+      <option v-for="(m, k) in VARIETIES" :key="k" :value="k">{{ vLabel(k) }}</option>
+    </select>
+    <select v-model="cp" @change="reload">
+      <option value="P">认沽（卖沽移仓）</option>
+      <option value="C">认购（卖购移仓）</option>
+    </select>
+    <!-- ★ 2026-09-28 东哥要：页面上直接更新数据，不要额外的 bat 文件。
+         更新在服务端后台线程跑，这里只负责「点一下 + 轮询 + 完成后刷新」。 -->
+    <button class="upd" :class="{busy:updRunning, done:updDone}" @click="doUpdate"
+            :disabled="updRunning" :title="updMsg || '抓取中金所最新日行情入库'">
+      {{ updRunning ? '更新中…' : (updDone ? '✓ 已更新' : '更新数据') }}
+    </button>
+    <span v-if="updMsg && !updRunning" class="updmsg" :class="{bad:!updDone}">{{ updMsg }}</span>
+  </div>
+
+  <div v-if="err" class="err">{{ err }}</div>
+
+  <!-- ============ 1. 实时决策 ============ -->
+  <div class="card livecard">
+    <h2>① 现在该不该移 <span class="sub">实时行情 · 可成交价口径</span></h2>
+    <div v-if="!L" class="empty">实时行情加载中…</div>
+    <div v-else-if="!L.ok" class="err">{{ L.error }}</div>
+    <template v-else>
+      <div class="live">
+        <div class="big">
+          <!-- ★ 2026-09-28：显式写出「平值档是按哪天的现货定的」。
+               原先只写「平值档 7600」，用户不知道这个 7600 是拿哪天算的
+               —— 大跌当天还在用上一交易日的现货，页面完全看不出来。 -->
+          <div class="lab">平值档 {{ L.atm.strike }} <span class="dim">（按今天现货 {{ f1(L.spot) }} 定）</span> · 可成交价差</div>
+          <div class="val" :class="L.atm.executable>=0?'up':'down'">
+            {{ f1(L.atm.executable) }}<span class="u"> {{ L.unit || '点' }}</span>
+          </div>
+          <div class="sub">
+            名义价差 {{ f1(L.atm.nominal) }} {{ L.unit || '点' }} ·
+            报价被刮 <b>{{ f1(L.atm.spread_cost) }}</b> {{ L.unit || '点' }}
+          </div>
+          <!-- ★ 2026-09-30：ETF 期权走的上交所 yunhq 免费口**不含买卖价**（实测 bid1/ask1 恒为 null），
+               所以「可成交价差」永远是空的。这里显式说明，否则用户只看到一个孤零零的「—」，
+               会以为程序坏了。★ 备选：新浪 CON_OP_ 接口是带买卖价的，可另行接入（见 docs/008 §9）。 -->
+          <div class="sub" v-if="L.atm.executable===null" style="color:#92400e">
+            ⚠ 该品种行情源不含买卖价（上交所 ETF 免费口）→ 算不出「可成交价差」，只给名义价差。
+          </div>
+          <!-- ✔ 判灯取值档位（见 docs/005 §7.4）：判灯不看单一平值档，
+               而是取「平值档 ±1 档」里可成交价差最大的那一档（更稳、更贴近实操）。
+               这里显式标出来，否则读者会拿大字的 {{ L.atm.strike }} 去对判灯、对不上。 -->
+          <div class="sub jref" v-if="L.judge_ref && L.judge_ref.strike !== L.atm.strike">
+            ✔ 判灯取值：<b>{{ L.judge_ref.strike }}</b> 档 <b>{{ f1(L.judge_ref.value) }}</b> {{ L.unit || '点' }}
+            （平值档 ±1 里取最大，见下方说明）
+          </div>
+          <!-- 整行不换行：左列 570px 是实测定的，见上方 CSS 注释 -->
+          <div class="cmp" v-if="L.hist_exact">
+            历史 <b>{{ L.hist_months }}</b> 个月的 T-{{ L.hist_T }} 窗口：均值 <b>{{ f1(L.hist_stats && L.hist_stats.mean) }}</b> · 中位 <b>{{ f1(L.hist_stats && L.hist_stats.median) }}</b><template v-if="L.atm.pct_hist !== null"> · 当前处于 <b :class="L.atm.pct_hist>=50?'up':'down'">{{ L.atm.pct_hist }}%</b> 分位（{{ L.hist_stats && L.hist_stats.sample }} 个历史样本）</template>
+          </div>
+          <div class="cmp" v-else>
+            当月还剩 <b>{{ L.trade_days_near }}</b> 个交易日，超过本程序的判灯窗口
+            T-{{ L.hist_window_max }}，因此<b>不给历史分位、也不给建议</b>。
+          </div>
+        </div>
+
+        <div>
+          <div class="verdict" v-if="L.hist_exact">
+            <span class="light" :class="L.judge.light"></span>{{ L.judge.text }}
+          </div>
+          <div class="verdict" v-else>
+            <span class="light gray"></span>尚未进入移仓窗口
+          </div>
+          <div class="meta">
+            <span><b class="hot">当月 {{ L.near }}</b> 剩 <b>{{ L.dte_near }}</b> 自然日 / <b>{{ L.trade_days_near }}</b> 交易日</span>
+            <span>次月 <b>{{ L.far }}</b> 剩 <b>{{ L.dte_far }}</b> 天</span>
+            <!-- ★ 2026-09-28 改文案：这个值装的一直是**现货**（F 口径见 docs/005），
+                 原来写「远期」是错的，会让人以为是 put-call 反推的远期。 -->
+            <span>现货 <b>{{ f1(L.spot) }}</b><template v-if="L.spot_time"><span class="dim" style="font-weight:400">（{{ (L.spot_time||'').slice(11,16) || L.spot_time }}）</span></template></span>
+            <span>当月到期 <b>{{ L.exp_near }}</b></span>
+          </div>
+          <ul class="reasons" v-if="L.hist_exact">
+            <li v-for="(r,i) in L.judge.reasons" :key="i">{{ r }}</li>
+          </ul>
+          <div class="note" v-if="!L.hist_exact">
+            ⚠ 当月还剩 <b>{{ L.trade_days_near }}</b> 个交易日，<b>尚未进入移仓窗口</b>
+            （本程序只判 T-1 ~ T-{{ 10 }}）。刚换月时当月时间价值还厚，
+            「不是价差不够大，而是这时候根本不该移」，故此处不判灯、也不给建议。
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px">
+        <table>
+          <thead><tr>
+            <th>行权价</th><th>状态</th><th>买回(当月)</th><th>卖出(次月)</th>
+            <th>平价理论<br /><span style="font-weight:400;color:#a7adb6;font-size:11px">市场价 − 理论价</span></th>
+            <th>名义价差</th><th>可成交价差</th><th>报价被刮</th>
+            <th>历史分位<br /><span style="font-weight:400;color:#a7adb6;font-size:11px">近 {{ L.hist_months }} 个月</span></th>
+            <th>IV近</th><th>IV远</th><th>报价</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="r in L.rows" :key="r.strike"
+                :class="{pick: r.strike===L.atm.strike}">
+              <td>{{ r.strike }}</td>
+              <td><span class="pill" :class="{itm:r.state==='实值'}">{{ r.state }}</span></td>
+              <td>{{ f1(r.buyback) }}</td>
+              <td>{{ f1(r.sell) }}</td>
+              <td>
+                <span v-if="r.parity_far===null" class="dim">—</span>
+                <template v-else>
+                  <b>{{ f1(r.parity_far) }}</b>
+                  <!-- ★ 2026-09-30 改口径：读者要的是「**市场报价是不是高于理论价**」，
+                       用来判断现在卖沽合不合适。所以这里显示 市场 − 理论（溢价），
+                       不是 理论 − 市场。溢价为正 = 市场报价贵 = 卖沽划算。 -->
+                  <span v-if="r.parity_far_premium===null" class="pill bad"
+                        style="margin-left:5px">市场无报价</span>
+                  <template v-else>
+                    <span :class="r.parity_far_premium>=0?'up':'down'"
+                          style="margin-left:5px;font-size:11px">{{ r.parity_far_premium>0?'+':'' }}{{ f1(r.parity_far_premium) }}</span>
+                    <div :class="r.parity_far_premium>=0?'up':'down'"
+                         style="font-size:10.5px">市场{{ r.parity_far_premium>=0?'贵':'便宜' }} → {{ r.parity_far_premium>=0?'卖沽划算':'卖沽吃亏' }}</div>
+                  </template>
+                </template>
+              </td>
+              <td class="dim">{{ f1(r.nominal) }}</td>
+              <td :class="r.executable>=0?'up':'down'"><b>{{ f1(r.executable) }}</b></td>
+              <td :class="r.spread_cost>0?'down':'dim'">{{ f1(r.spread_cost) }}</td>
+              <td>
+                <span v-if="r.pct_hist===null" class="dim">—</span>
+                <span v-else :class="r.pct_hist>=50?'up':'down'">{{ r.pct_hist }}%</span>
+              </td>
+              <td>{{ r.iv_near===null?'—':r.iv_near }}</td>
+              <td>{{ r.iv_far===null?'—':r.iv_far }}</td>
+              <td><span class="pill" :class="r.tradable?'ok':'bad'">{{ r.tradable?'可成交':'单边' }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="note">
+          <b>可成交价差 = 次月买一 − 当月卖一</b>（卖次月成交在对手买一，买回当月成交在对手卖一）。
+          名义价差用最新价，看着好看但可能成交不了 —— 两条腿各被买卖价差刮一次。
+          「报价被刮」为负 = 最新价已滞后于盘口。
+        </div>
+        <div class="note" style="margin-top:6px;border-left:3px solid #93c5fd;padding-left:10px">
+          <b>平价理论价</b>（次月卖出腿的参考价）= 用<b>同档认购</b>价 + <b>同月平价远期</b>反推：
+          <code>P = C − (F − K)</code>，F 由该月全链的 <code>C−P+K</code> 中位数定。<br />
+          它右边的数字是 <b>市场价 − 理论价</b>（<b>正 = 市场报价比理论价贵</b>）：
+          <b>贵 → 现在卖沽划算</b>（你卖得比"公允"贵）；<b>便宜 → 卖沽吃亏</b>。<br />
+          <b>标「市场无报价」= 这档认沽当天一笔没成交（市场价 0）</b>，理论价就是补这个缺口的。<br />
+          ⚠️ 两条边界，别越界用：<br />
+          ① 它是「<b>与认购自洽</b>」的参考价，<b>不是独立估值</b> —— 认购报价失真时它跟着失真；
+          它衡量的其实是「<b>认沽相对同档认购</b>贵不贵」，不是绝对便宜。<br />
+          ② 近月平价本来就成立（理论价≈市场价），<b>价值在远月零成交档</b>。
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- ============ 2. 历史分布 ============ -->
+  <div class="card">
+    <h2>② 历史上，交割前第几天移仓最划算
+      <span class="sub">过去 {{ W ? W.months : 12 }} 次月度到期 · 收盘价口径</span></h2>
+
+    <div class="ctl">
+      <span class="lb">行权价档位</span>
+      <div class="seg">
+        <!-- ★ 2026-09-28：把「当前平值档到底是哪一档」写在按钮上。
+             原先只写「当前平值 K」，用户不知道基准档是多少 ——
+             大跌当天基准档会跳（7600 → 7300），不写出来就会以为程序没更新。 -->
+        <button v-for="o in [-1,0,1]" :key="o" :class="{on:offset===o}"
+                @click="setOffset(o)">{{ o===0?('当前平值 K' + ((L&&L.ok)?'（'+L.atm.strike+'）':'')):(o>0?'上一档 K+1':'下一档 K−1') }}</button>
+      </div>
+      <span class="sp" style="flex:1"></span>
+      <span class="lb">距离交割</span>
+      <!-- ★ 2026-09-28：把「今天是 T-几」直接写出来 + 在对应按钮上打点。
+           东哥首次实盘的困惑：页面默认停在 T-1，而今天其实是 T-9，
+           于是蓝柱标着「本月T-9」、上面却选着 T-1，完全对不上。 -->
+      <span v-if="todayT" class="todaytip">今天 = T-{{ todayT }}</span>
+      <div class="seg">
+        <button v-for="n in 10" :key="n" :class="{on:t===n, isToday:n===todayT}" @click="t=n"
+                :title="n===todayT ? ('今天就在这里：当月还剩 '+n+' 个交易日') : ''">
+          T-{{ n }}<i v-if="n===todayT" class="dot"></i>
+        </button>
+      </div>
+    </div>
+
+    <div v-if="!W" class="empty">历史数据加载中…</div>
+    <div v-else-if="!W.ok" class="err">{{ W.error }}</div>
+    <template v-else>
+      <div class="kpihead">历史 {{ S?S.sample:'—' }} 个月 · 同一 T-{{ t }} 窗口 <span class="dim">（下面 6 张卡都是<b>历史统计</b>，不含今天）</span></div>
+      <div class="kpis">
+        <div class="kpi"><div class="lab">样本月数</div>
+          <div class="val">{{ S?S.sample:'—' }}<small>个</small></div></div>
+        <div class="kpi"><div class="lab">价差均值（当前档）</div>
+          <div class="val up">{{ f1(S&&S.mean) }}<small>点</small></div></div>
+        <div class="kpi"><div class="lab">价差中位数</div>
+          <div class="val up">{{ f1(S&&S.median) }}<small>点</small></div></div>
+        <div class="kpi"><div class="lab">价差 / 现货</div>
+          <div class="val">{{ S?S.ratio_pct:'—' }}<small>%</small></div></div>
+        <div class="kpi"><div class="lab">当月 IV 均值</div>
+          <div class="val">{{ S&&S.iv_near!=null?S.iv_near:'—' }}<small>%</small></div></div>
+        <div class="kpi"><div class="lab">次月 IV 均值</div>
+          <div class="val">{{ S&&S.iv_far!=null?S.iv_far:'—' }}<small>%</small></div></div>
+      </div>
+
+      <!-- ⚠️ 双轴图必须显式给高度：只写 height:auto 时浏览器可能不按 viewBox 比例算，
+           会把图压扁导致柱子溢出（踩过：svg 实际只有 150px 高，柱高 182px）。
+           用 aspect-ratio 明确锁定 1120:344 的比例。 -->
+      <svg :viewBox="'0 0 1120 344'"
+           style="width:100%;aspect-ratio:1120/344;height:auto;display:block;overflow:visible">
+        <!-- 左轴标题 -->
+        <text x="24" y="20" font-size="11.5" fill="#8a9099">移仓价差（点）</text>        <!-- 右轴标题 -->
+        <text x="1096" y="20" text-anchor="end" font-size="11.5" fill="#1f6feb">价差/现货（%）</text>
+
+        <!-- 图例：条数随「是否有本月柱」变化（无本月时只有 2 项，不能挂着"本月"骗人） -->
+        <g v-if="bars.length && !todayCell">
+          <rect x="418" y="12" width="11" height="11" rx="1.5" fill="#d94a4a" />
+          <text x="434" y="21.5" font-size="11.5" fill="#5b6472">历史移仓价差（点）</text>
+          <line x1="566" x2="586" y1="17.5" y2="17.5" stroke="#1f6feb" stroke-width="1.8" />
+          <circle cx="576" cy="17.5" r="2.8" fill="#1f6feb" />
+          <text x="592" y="21.5" font-size="11.5" fill="#5b6472">价差/现货（%）</text>
+        </g>
+        <g v-else-if="bars.length">
+          <rect x="352" y="12" width="11" height="11" rx="1.5" fill="#d94a4a" />
+          <text x="368" y="21.5" font-size="11.5" fill="#5b6472">历史移仓价差（点）</text>
+          <rect x="510" y="12" width="11" height="11" rx="1.5" fill="#1f6feb" />
+          <text x="526" y="21.5" font-size="11.5" fill="#1f6feb" font-weight="600">本月（今天）</text>
+          <line x1="626" x2="646" y1="17.5" y2="17.5" stroke="#1f6feb" stroke-width="1.8" />
+          <circle cx="636" cy="17.5" r="2.8" fill="#1f6feb" />
+          <text x="652" y="21.5" font-size="11.5" fill="#5b6472">价差/现货（%）</text>
+        </g>
+
+        <!-- 水平网格线：左右两条轴共用同一组 y 坐标（grid 里同时带 nv/pv） -->
+        <g v-for="(g,i) in grid" :key="'g'+i">
+          <line :x1="GEO.x0" :x2="GEO.x1" :y1="g.y" :y2="g.y" stroke="#eef0f3" />
+          <text :x="GEO.x0-8" :y="g.y+4" text-anchor="end" font-size="11" fill="#a7adb6">{{ g.nv }}</text>
+        </g>
+        <g v-for="(g,i) in gridR" :key="'gr'+i">
+          <text :x="GEO.x1+8" :y="g.y+4" font-size="11" fill="#1f6feb" opacity=".75">{{ g.pv }}</text>
+        </g>
+
+        <!-- 柱 -->
+        <rect v-for="(b,i) in bars" :key="'b'+i" :x="b.x" :y="b.y" :width="b.w"
+              :height="b.h" :fill="b.cur?'#1f6feb':(b.holiday?'#f0a8a8':'#d94a4a')"
+              :stroke="b.isToday?'#0f4c9c':'none'" :stroke-width="b.isToday?1.2:0" rx="2" />
+        <text v-for="(b,i) in bars" :key="'t'+i" :x="b.cx" :y="b.y-5" text-anchor="middle"
+              font-size="11" :font-weight="b.cur?700:400"
+              :fill="b.cur?'#1f6feb':'#6b7280'">{{ b.v }}{{ b.holiday ? '*' : '' }}</text>
+
+        <!-- 历史 / 本月 的分隔虚线（只在有本月点时出现） -->
+        <line v-if="todayCell" :x1="sepX" :x2="sepX" :y1="GEO.yTop-8" :y2="GEO.yBot"
+              stroke="#c9d4e6" stroke-width="1" stroke-dasharray="4 4" />
+
+        <!-- 横轴：轴线 + 月份标签 -->
+        <line :x1="GEO.x0" :x2="GEO.x1" :y1="GEO.yBot" :y2="GEO.yBot" stroke="#c8ced6" />
+        <text v-for="(b,i) in bars" :key="'x'+i" :x="b.cx" :y="GEO.yBot+18" text-anchor="middle"
+              font-size="11" :font-weight="b.cur?700:400"
+              :fill="b.cur?'#1f6feb':'#8a9099'">{{ b.label }}</text>
+
+        <!-- 折线（% 口径，对齐右轴） -->
+        <polyline :points="linePts" fill="none" stroke="#1f6feb" stroke-width="1.8"
+                  opacity=".9" stroke-linejoin="round" />
+        <circle v-for="(p,i) in linePts2" :key="'c'+i" :cx="p.x" :cy="p.y" r="2.8"
+                fill="#fff" stroke="#1f6feb" stroke-width="1.6" />
+      </svg>
+
+      <div class="note">
+        口径：档位 = 当月<b>平值</b>行权价（可切上下档）；价差 = 次月收盘 − 当月收盘；
+        零成交用结算价；到期日遇法定假日<b>顺延</b>。<br />
+        <!-- ★ 2026-09-28 加：把「平值档是按哪天的现货定的」讲清楚。
+             东哥问过「曲线图应该用今天的平值而不是上一交易日的 7600 吧」——
+             答案：历史 12 根各用**各自当月**的平值档（同档位横向比较），
+             今天那根用**今天的**平值档。所以基准档会随行情跳，这是对的。 -->
+        <span class="dim">「平值」按<b>各自当天</b>的现货收盘价定 —— 历史 12 根各用各自当月的平值档；
+        今天那根用<b>今天的</b>平值档<template v-if="L && L.ok">（今天 = <b>{{ L.atm.strike }}</b>，
+        由现货 {{ f1(L.spot) }} 定）</template>。所以是<b>同档位横向比较</b>，不是拿同一个行权价硬比。</span><br />
+        <template v-if="todayCell">
+          <b style="color:#1f6feb">本月（今天）</b>那根 = 用<b>实时行情</b>按同一档位、同一口径算出的价差，
+          与历史 12 个月并排 —— 直接看出今天厚还是薄。
+          <template v-if="!todayTAligned">
+            <br /><span style="color:#c8871a">⚠️ 今天是 T-{{ todayT }}，而当前显示的是各月 T-{{ t }} 的历史分布
+            —— 两者 <b>T 不同</b>，横向高低只作参考。</span>
+            <button class="jump" @click="t=todayT">切到 T-{{ todayT }}（今天所在）</button>
+          </template>
+        </template>
+        <template v-else>
+          <b style="color:#1f6feb">本月（今天）</b>那根：实时行情还没取到（刷新后会显示）。
+        </template>
+      </div>
+
+      <!-- ===== ②b 认沽隐含波动率（当月 / 次月两条腿） ===== -->
+      <div class="subhead">
+        <span class="lb">认沽隐含波动率（%）</span>
+        <span class="dim">当月 / 次月两条腿，各自按<b>本腿</b>到期时间折算 · 档位/窗口跟随上方选择</span>
+      </div>
+      <svg :viewBox="'0 0 1120 300'"
+           style="width:100%;aspect-ratio:1120/300;height:auto;display:block;overflow:visible">
+        <text x="24" y="18" font-size="11.5" fill="#8a9099">隐含波动率（%）</text>
+
+        <!-- 图例 -->
+        <g v-if="ivBars.length">
+          <line x1="430" x2="452" y1="14" y2="14" stroke="#d94a4a" stroke-width="2" />
+          <circle cx="441" cy="14" r="3" fill="#d94a4a" />
+          <text x="458" y="18" font-size="11.5" fill="#5b6472">当月 IV</text>
+          <line x1="546" x2="568" y1="14" y2="14" stroke="#1f6feb" stroke-width="2" />
+          <circle cx="557" cy="14" r="3" fill="#1f6feb" />
+          <text x="574" y="18" font-size="11.5" fill="#5b6472">次月 IV</text>
+        </g>
+
+        <!-- 网格 -->
+        <g v-for="(g,i) in ivGrid" :key="'ig'+i">
+          <line :x1="IVGEO.x0" :x2="IVGEO.x1" :y1="g.y" :y2="g.y" stroke="#eef0f3" />
+          <text :x="IVGEO.x0-8" :y="g.y+4" text-anchor="end" font-size="11" fill="#a7adb6">{{ g.v }}%</text>
+        </g>
+
+        <!-- 两条折线 -->
+        <polyline :points="ivLineNear" fill="none" stroke="#d94a4a" stroke-width="1.9"
+                  stroke-linejoin="round" opacity=".92" />
+        <polyline :points="ivLineFar" fill="none" stroke="#1f6feb" stroke-width="1.9"
+                  stroke-linejoin="round" opacity=".92" />
+        <circle v-for="(p,i) in ivPtsNear" :key="'in'+i" :cx="p.x" :cy="p.y" r="2.6"
+                fill="#fff" stroke="#d94a4a" stroke-width="1.6" />
+        <circle v-for="(p,i) in ivPtsFar" :key="'if'+i" :cx="p.x" :cy="p.y" r="2.6"
+                fill="#fff" stroke="#1f6feb" stroke-width="1.6" />
+
+        <!-- 横轴 -->
+        <line :x1="IVGEO.x0" :x2="IVGEO.x1" :y1="IVGEO.yBot" :y2="IVGEO.yBot" stroke="#c8ced6" />
+        <text v-for="(b,i) in ivBars" :key="'ix'+i" :x="b.cx" :y="IVGEO.yBot+18" text-anchor="middle"
+              font-size="11" fill="#8a9099">{{ b.label }}</text>
+      </svg>
+
+      <div class="note">
+        <b>这张图在回答什么</b>：移仓 = 买回当月 + 卖出次月。
+        <b style="color:#1f6feb">次月 IV 高于当月</b>时，卖出的是更贵的波动率 → 有利于移仓；
+        两线<b>距离越大</b>，时机越好。<br />
+        ⚠️ 但<b>并非总是次月更高</b> —— 实测 12 个月里有 5 个月次月反低于当月，
+        所以要看当期的实际结构，不能默认"次月一定贵"。<br />
+        ⚠️ <b>T-1（到期前 1 天）时 IV 会明显跳动</b>：当月合约只剩 1 天，时间价值趋零、
+        IV 对价格极度敏感（实测 12 个月标准差 6.06，T-5 只有 3.89）。
+        <b>要看清结构，建议看 T-5 之后</b>的窗口。
+      </div>
+    </template>
+  </div>
+
+  <!-- ============ 3. 判断依据 ============ -->
+  <div class="card">
+    <h2>③ 判断依据 <span class="sub">阈值口径 + 三大驱动</span></h2>
+    <div class="cols">
+      <div>
+        <template v-if="L && L.ok">
+          <!-- ★ 2026-09-30：判灯窗口外（hist_exact=false）**不再显示阈值表**。
+               原先 ① 写「尚未进入移仓窗口、不给建议」，③ 却照样列出
+               「绿灯 ≥ 0.062 点」这种阈值，两处自相矛盾，读者会以为程序在给建议。
+               阈值表只在真正判灯时才有意义。 -->
+          <table v-if="L.hist_exact">
+            <thead><tr><th>当前判灯线</th><th>取值</th><th>口径</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><span class="light green"></span>绿灯 · 可以考虑移仓</td>
+                <td class="up">≥ {{ L.judge.threshold }} {{ L.unit || '点' }}</td>
+                <td class="dim">{{ L.judge.dynamic ? '75% 分位' : '经验上限' }}</td>
+              </tr>
+              <tr>
+                <td><span class="light yellow"></span>黄灯 · 可移可等</td>
+                <td>≥ {{ L.judge.expect }} {{ L.unit || '点' }}</td>
+                <td class="dim">{{ L.judge.dynamic ? '中位数' : '经验下限' }}</td>
+              </tr>
+              <tr>
+                <td><span class="light red"></span>红灯 · 再等等</td>
+                <td class="down">&lt; {{ L.judge.expect }} {{ L.unit || '点' }}</td>
+                <td class="dim">低于{{ L.judge.dynamic ? '中位' : '下限' }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="note" v-if="L.hist_exact">
+            <template v-if="L.judge.dynamic">
+              <b>阈值不是拍出来的经验值</b>，而是取<b>近 {{ L.hist_months }} 个月、同 T-{{ L.hist_T }} 窗口的
+              {{ L.judge.sample }} 个真实样本</b>算出来的：中位 = 黄灯线，75% 分位 = 绿灯线。<br />
+              好处是<b>随市场自动漂移</b> —— 写死的经验值两三年就会过时
+              （2024 年 MO 常态 70~100，2026 年的参考值已经是 200）。
+            </template>
+            <template v-else>
+              <span class="down">⚠ 当前历史样本不足（需 ≥ 6 个），已回退到兜底阈值。</span>
+              <br />本次口径：{{ L.judge.source }}。
+              <template v-if="(L.unit || '点') === '点'">
+                上表中的「经验上限 / 经验下限」是写死的参考值，<b>不会随市场漂移</b>，请只当粗略量级看待。
+              </template>
+              <template v-else>
+                该比例是拿 MO 的兜底阈值反推的（100/7300 ≈ 1.4%、70/7300 ≈ 1.0%）——
+                ETF 期权价差天然与现货成正比，所以用比例而不是写死的元数。
+              </template>
+            </template>
+            <br /><br />
+            <b>判灯看哪一档？</b>不看单一平值档，而是在 <b>平值档 ±1 档</b>里取
+            <b>可成交价差最大</b>的那一档 —— 标的点位在相邻两档之间时，
+            平值档会来回跳、判灯跟着翻脸（行情其实没变）；取相邻档最大值更稳，
+            也更接近实操（卖沽通常挂整数关口，你会在相邻档之间选）。
+            本次取值：<b>{{ L.judge_ref && L.judge_ref.strike }}</b> 档
+            <b>{{ f1(L.judge_ref && L.judge_ref.value) }}</b> {{ L.unit || '点' }}。
+          </div>
+          <div class="note" v-else>
+            当月还剩 <b>{{ L.trade_days_near }}</b> 个交易日，<b>尚未进入判灯窗口</b>
+            （本程序只判 T-1 ~ T-{{ L.hist_window_max }}）。刚换月时当月时间价值还厚，
+            这时候移仓并不划算 —— <b>不是价差不够大，而是这时候根本不该移</b>，故此处不给阈值与建议。
+          </div>
+        </template>
+        <div v-else class="empty">实时行情加载中…</div>
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">移仓价差的三大驱动</div>
+        <ol class="reasons">
+          <li><b>近月时间价值收敛归零</b> —— 越接近到期，当月越便宜，价差越大</li>
+          <li><b>贴水扩大</b> —— 贴水越大，远月卖沽越贵</li>
+          <li><b>波动率上升</b> —— 升波时跨期价差扩大</li>
+        </ol>
+        <div class="note">
+          <!-- ★ 2026-09-30：下面四条是**参考程序（中证1000 股指期权月报）**的原话，
+               单位是「点」。ETF 品种照搬会被误读成「元」，故显式标注出处与口径。 -->
+          <span class="dim">（以下引自参考程序的中证1000 股指期权月报，单位为「点」，非本品种单位）</span><br />
+          「追求价差最大肯定是<b>平值附近临近到期</b>移仓」<br />
+          「行权价越高、实值越深，本次移仓价差越小」—— 深实沽受内在价值主导，升波红利弱。<br />
+          <b>次月 IV 高 → 早移</b>（卖出更贵的波动率）；<b>次月 IV 低 → 移晚更有利</b>。<br />
+          另两条量化标准：「移仓到下月至少增加 <b>30 点</b>时间价值」、
+          「日均时间收益 &lt; <b>1 点/天</b>就考虑移仓」。
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdn.bootcdn.net/ajax/libs/vue/3.4.21/vue.global.prod.js"></script>
+<script>
+// ── 环境适配（本地 / 线上同一份代码）───────────────────────────
+//   本地：服务端直接托 frontend/，同一目录下三个 html 互链
+//   线上：三个静态页分别落成独立文件（见 navBase），
+//         API 走 nginx 前缀（见 apiBase）
+//
+// ⚠️ 为什么不用「相对路径 ./xxx.html」切换页面：
+//   nginx 给每个短地址都写了 `location = /option` 精确匹配，
+//   页面在 /option 下时，相对链接 './migrate.html' 会被浏览器解析成
+//   /migrate.html（目录变成根）→ 直接 404。
+//   本地没 nginx 所以看不出问题 —— 这是上线才会炸的坑。
+function isLocalPage(){
+  const h = location.hostname;
+  return (h === '127.0.0.1' || h === 'localhost' || h === '');
+}
+
+/** 页面互链前缀：本地 './'，线上 '/' */
+function navBase(){ return isLocalPage() ? './' : '/'; }
+
+// ★ 2026-09-30 定稿（东哥拍板）：**本地文件名 = 线上路由名（+ .html 后缀）**，
+//   所以这里不需要任何映射表。
+//     本地 frontend/option.html        ↔ 线上 /option
+//          frontend/option-daily.html  ↔      /option-daily
+//          frontend/option-risk.html   ↔      /option-risk
+//   ⚠️ 之前的坑：本地叫 index/migrate/expiry.html，与路由名对不上，
+//      于是「持仓体检 / 日报 / 移仓决策台」三个链接在本地全是 404。
+//      文件名跟路由名对齐后，两边同一套逻辑、不再有特判。
+
+/** 页面文件名：本地加 .html，线上直接用短地址 */
+function navFile(name){ return isLocalPage() ? (name + '.html') : name; }
+
+/** 拼接同站页面链接，如 hrefOf('option-risk') */
+function hrefOf(name){ return navBase() + navFile(name); }
+
+// API 前缀：线上 nginx `location /optarb_api/ { proxy_pass ...:8104/api/; }`
+//   ⚠️ proxy_pass 是「替换」不是「相加」：前端只能写 /optarb_api/xxx，
+//      绝不能再自带 /api，否则 /optarb_api/api/xxx → 404（future 项目踩过）。
+function apiBase(){
+  return isLocalPage() ? '/api' : '/optarb_api';
+}
+const API = apiBase();
+
+/** 拼接请求地址：自动剥掉重复的 /api，避免 /optarb_api/api/xxx */
+function requestUrl(path){
+  // path 形如 '/live?variety=MO' 或 'live?...'，统一成 '/live?...'
+  let p = path.startsWith('/') ? path : ('/' + path);
+  // 调用处若习惯写 '/api/xxx'，这里剥掉一层
+  if (p.startsWith('/api/')) p = p.slice(4);
+  return API + p;
+}
+</script>
+<script>
+const { createApp, ref, computed, onMounted, watch } = Vue;
+
+createApp({
+  setup() {
+    const variety = ref('MO');
+    const cp = ref('P');
+    const offset = ref(0);
+    const t = ref(1);
+    const W = ref(null);
+    const L = ref(null);
+    const err = ref('');
+
+    // ★ 2026-09-30：品种下拉从写死 MO/IO/HO 改为 **由 /api/meta 动态生成**。
+    //   原因：ETF 期权（E300/E500…）已接入 config.VARIETIES，写死的下拉看不见它们。
+    //   显示名规则与体检器一致：股指期权带真代码（券商APP里能查到），ETF 只显示标准名。
+    const VARIETIES = ref({});
+    function vLabel(k) {
+      const m = VARIETIES.value[k] || {};
+      return (m.exchange === 'CFFEX') ? (k + ' ' + (m.name || k)) : (m.name || k);
+    }
+
+    // ★ 2026-09-30：原来写死 1 位小数 → ETF 期权（价格 0.0155 这种量级）整列显示成 0.0。
+    //   改成按品种定小数位：ETF 期权 4 位（元/份），股指期权 1 位（点）。
+    //   小数位由后端 /api/live 的 premium_decimals 给（见 core/live.py）。
+    const pdec = computed(() => {
+      const d = L.value && L.value.premium_decimals;
+      return (d === 0 || d) ? d : 1;
+    });
+    const f1 = (v) => {
+      if (v === null || v === undefined || isNaN(v)) return '—';
+      return Number(v).toFixed(pdec.value);
+    };
+
+    // ★ 2026-09-28 加：页面上必须看得到「今天几号、现在几点」。
+    //   `todayLabel` 用后端返回的 today（服务器日期，权威）；
+    //   `clock` 是本地走秒，只为让用户确认页面是活的。
+    const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    const clock = ref('');
+    const todayLabel = computed(() => {
+      const iso = (L.value && L.value.today) || new Date().toISOString().slice(0, 10);
+      const d = new Date(iso + 'T00:00:00');
+      return isNaN(d) ? iso : `${iso}（${WEEK[d.getDay()]}）`;
+    });
+    function tickClock() {
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, '0');
+      clock.value = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    }
+
+    // ★ 2026-10-03：市场状态，来自已有的 /meta（不额外加请求）。
+    //   非盘中后端把行情缓存拉长到下次开市，页面必须说明「这是最近收盘价」。
+    const MKT = ref(null);
+    const mktText = computed(() => {
+      const m = MKT.value;
+      if (!m) return '';
+      return m.label + ' · 显示最近收盘'
+        + (m.next_session ? '（下次开市 ' + m.next_session + '）' : '');
+    });
+
+    // ★ 2026-09-28：页面上直接更新数据（东哥：不要额外的 bat）。
+    //   服务端后台线程抓，这里只轮询状态 —— 同步等一定会撞上前端 20s 超时。
+    const updRunning = ref(false);
+    const updDone = ref(false);
+    const updMsg = ref('');
+    async function doUpdate() {
+      if (updRunning.value) return;
+      updRunning.value = true; updDone.value = false; updMsg.value = '';
+      try {
+        await get(requestUrl(`/update?days=10`), 20000);
+        for (let i = 0; i < 240; i++) {                 // 最多等 6 分钟
+          await new Promise(r => setTimeout(r, 1500));
+          let s;
+          try { s = await get(requestUrl(`/update/status`), 10000); } catch (e) { continue; }
+          if (!s.running) {
+            updDone.value = !!s.success;
+            updMsg.value = s.success
+              ? `已更新到最新（${(s.finished_at || '').slice(11, 16)}）`
+              : ('更新失败：' + (s.error || '未知错误'));
+            break;
+          }
+        }
+        if (updDone.value) await reload();
+        else if (!updMsg.value) updMsg.value = '仍在后台更新，稍后刷新页面看看';
+      } catch (e) {
+        updMsg.value = '更新请求失败：' + e.message;
+      } finally {
+        updRunning.value = false;
+      }
+    }
+
+    async function get(url, ms = 25000) {
+      const ac = new AbortController();
+      const tm = setTimeout(() => ac.abort(), ms);
+      try {
+        const r = await fetch(url, { signal: ac.signal });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return await r.json();
+      } finally { clearTimeout(tm); }
+    }
+
+    // ---- 品种表（下拉选项来源）----
+    async function loadMeta() {
+      try {
+        const m = await get(requestUrl('/meta'), 15000);
+        if (m && m.ok) {
+          MKT.value = m.market || null;
+        }
+        if (m && m.ok && m.varieties) {
+          VARIETIES.value = m.varieties;
+          if (!VARIETIES.value[variety.value]) {
+            variety.value = Object.keys(VARIETIES.value)[0] || variety.value;
+          }
+        }
+      } catch (e) {
+        // 拉不到就保留空表（下拉只剩当前项），不阻塞主流程
+      }
+    }
+
+    // ---- 历史窗口 ----
+    async function loadWindow() {
+      try {
+        W.value = await get(requestUrl(`/window?variety=${variety.value}&cp=${cp.value}&offset=${offset.value}&months=12&tmax=10`));
+      } catch (e) {
+        W.value = { ok:false, error: '历史数据加载失败：' + (e.name==='AbortError'?'超时':e.message) };
+      }
+    }
+
+    // ---- 实时 ----
+    async function loadLive() {
+      try {
+        L.value = await get(requestUrl(`/live?variety=${variety.value}&cp=${cp.value}`));
+      } catch (e) {
+        L.value = { ok:false, error: '实时行情加载失败：' + (e.name==='AbortError'?'超时':e.message) };
+      }
+    }
+
+    async function reload() {
+      offset.value = 0;
+      await Promise.all([loadWindow(), loadLive()]);
+      // ★ 2026-09-28：默认跳到「今天所在的 T」。
+      //   原来固定 T-1，但今天可能根本不是 T-1（首次实盘那天是 T-9）——
+      //   用户看到蓝柱标着「本月T-9」、上面却选着 T-1，完全对不上。
+      //   蓝柱 = 今天的实测值，**只有和「同一 T」的历史列比才有意义**。
+      const tn = (L.value && L.value.ok) ? L.value.trade_days_near : null;
+      t.value = (tn >= 1 && tn <= 10) ? tn : 1;
+    }
+    async function setOffset(o) { offset.value = o; await loadWindow(); }
+
+    // ---- 当前选中的 T-N 统计 ----
+    const S = computed(() => (W.value && W.value.ok) ? W.value.stats[String(t.value)] : null);
+
+    // ---- 图（双 Y 轴，对齐参考程序的画法） ----
+    // ★ 关键：左轴（点数）与右轴（%）**各自独立缩放**，两条轴都**不从 0 起** ——
+    //   这是矮柱（如 25/12 只有 140 点）也能看清、且折线波动可辨认的前提。
+    //   范围用「数据自适应」而不是写死 90~270 / 1%~3.5%：写死会在行情放大时出界。
+    const GEO = { x0: 78, x1: 1052, yTop: 56, yBot: 296 };
+    const H = GEO.yBot - GEO.yTop;
+
+    // 取「好看的刻度间隔」：目标 6 条（参考程序是 6 条）
+    // ⚠️ 入参 span 已是「待分割的总跨度」，本函数只负责挑一个好看的 step。
+    function niceStep(span) {
+      const raw = span;
+      const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+      const cands = [1, 2, 2.5, 5, 10].map(m => m * mag);
+      return cands.find(c => c >= raw) || cands[cands.length - 1];
+    }
+    // 给定数据 → 下限、上限、刻度数组（下限向下取整、上限向上取整到刻度）
+    function axisScale(vals, target, pad) {
+      const lo = Math.min(...vals), hi = Math.max(...vals);
+      const span0 = Math.max(hi - lo, Math.abs(hi) * 0.12 || 1);
+      const step = niceStep(span0 * (1 + pad) / target);
+      let a = Math.floor((lo - span0 * pad * 0.5) / step) * step;
+      let b = Math.ceil((hi + span0 * pad * 0.35) / step) * step;
+      if (b - a < step * 2) b = a + step * 2;
+      const ticks = [];
+      for (let v = a; v <= b + step * 0.001; v += step) ticks.push(Math.round(v * 1000) / 1000);
+      return { lo: a, hi: b, step, ticks };
+    }
+
+    const seriesCells = computed(() =>
+      (W.value && W.value.ok) ? W.value.series.map(s => s.cells[t.value - 1]) : []);
+
+    // ★★ 2026-09-27（东哥拍板方案 B）：把「当月（今天）」作为**第 13 个点**拼进来，
+    //   让图上直接看到"今天这个价差 vs 历史 12 个月" — 这是 ② 区存在的意义。
+    //
+    //   只用前端拼、**不动后端**，原因：
+    //     1) 后端 `series` 的语义是「历史月度到期」，混进未到期合约会污染 `stats` →
+    //        KPI 卡（样本月数/均值/中位/分位）会变，那是另一件事，不能动。
+    //     2) `/api/window` 有 LRU 缓存，塞实时数据会打破缓存。
+    //     3) 实时数据本来就来自另一个接口 `/api/live`，两个源在前端汇合最自然。
+    //
+    //   口径对齐（重要）：
+    //     · 历史柱用 **名义价差**（结算价之差，`_px`），所以今天这根也用 **nominal**，
+    //       才能横向比；可成交价差只在 ① 区判灯那边用（它才是真能拿到的钱）。
+    //     · ★ 2026-09-27 修正（东哥纠正）：本月柱**恒为今天的实测值**，不随 t 变。
+    //       理由：今天只有一个客观值 —— 当月剩几个交易日，今天就是那个 T。
+    //       切 T-N 改变的是**旁边 12 根历史柱**（各月 T-N 的值），本月柱原地不动。
+    //       ⚠️ 因此当 `trade_days_near !== t` 时，本月柱与历史列 **T 不同**，
+    //          横向高低只作参考；图下会显式说明这一点（todayT 字段）。
+    //       （原先写死「T 不对齐就不画」是错的 —— 东哥明说"不能这样，这样死板了"。）
+    const todayCell = computed(() => {
+      const Lv = L.value;
+      if (!Lv || !Lv.ok) return null;
+      const spot = Lv.forward;
+      if (!spot) return null;
+      // 取**平值档 ±offset** 档（与历史图同一档位口径）
+      const rows = Lv.rows || [];
+      const sorted = [...rows].sort((a, b) => a.strike - b.strike);
+      const ai = sorted.findIndex(r => r.strike === Lv.atm.strike);
+      const r = sorted[ai + offset.value];
+      if (!r || r.nominal == null) return null;
+      return {
+        date: (Lv.generated_at || '').slice(0, 10),
+        strike: r.strike, spot,
+        net: r.nominal,
+        net_pct: r.nominal / spot * 100,
+        zero_vol: false, holiday: false,
+        isToday: true,
+      };
+    });
+
+    // 今天客观处在 T 几 = 当月剩余交易日数（用于图下说明「本月柱是 T-几 的值」）
+    const todayT = computed(() => {
+      const Lv = L.value;
+      return (Lv && Lv.ok) ? Lv.trade_days_near : null;
+    });
+    // 本月柱的 T 与当前所选 t 是否一致（不一致 → 图下提示"横向比较仅供参考"）
+    const todayTAligned = computed(() =>
+      todayT.value != null && todayT.value === t.value);
+
+    // 图上实际画的序列 = 历史 12 个月 [+ 当月（今天）]
+    const chartCells = computed(() => {
+      const base = seriesCells.value;
+      const tc = todayCell.value;
+      return tc ? [...base, tc] : base;
+    });
+    // 与 chartCells 一一对应的 x 轴标签
+    // 本月柱标成「本月T-10」这种，让人一眼看出它的 T 与历史列可能不同
+    const chartLabels = computed(() => {
+      const labels = (W.value && W.value.ok)
+        ? W.value.series.map(s => s.near.slice(0, 2) + '/' + s.near.slice(2)) : [];
+      if (!todayCell.value) return labels;
+      return [...labels, todayT.value != null ? ('本月T-' + todayT.value) : '本月'];
+    });
+    // 每根柱的「是否当月」。历史里叫 near 的那个合约 = 当月；额外点由 isToday 标记。
+    const chartNearKeys = computed(() => {
+      const keys = (W.value && W.value.ok) ? W.value.series.map(s => s.near) : [];
+      return todayCell.value ? [...keys, '__today__'] : keys;
+    });
+
+    // ★★ 双轴必须**共用同一组水平网格线**，否则两条轴的刻线会错位、看起来像两套坐标系。
+    //   做法：网格线数量与 y 坐标**完全由左轴（点数）决定**；
+    //   右轴（%）只把「自己的数值」标注在**同一批 y 位置**上 ——
+    //   即右轴的值 = 按左轴 y 位置反算出来的百分数。
+    //   这样视觉上就是标准的「左右双轴共网格」。
+    const GRID_N = 6;                     // 网格线条数（参考程序也是 6 条）
+
+    const netAxis = computed(() => {
+      const vals = chartCells.value.map(c => c ? c.net : null).filter(v => v !== null);
+      return vals.length ? axisScale(vals, GRID_N, 0.10)
+                         : { lo: 0, hi: 100, step: 20, ticks: [0, 20, 40, 60, 80, 100] };
+    });
+    // 右轴范围：只用来定「1% 等于多少 y」，不参与网格线数量
+    const pctAxis = computed(() => {
+      const vals = chartCells.value.map(c => c ? c.net_pct : null).filter(v => v !== null);
+      return vals.length ? axisScale(vals, GRID_N, 0.10) : { lo: 0, hi: 5, step: 1, ticks: [] };
+    });
+
+    const bars = computed(() => {
+      const cells = chartCells.value;
+      if (!cells.length) return [];
+      const ax = netAxis.value, span = ax.hi - ax.lo || 1;
+      const n = cells.length;
+      const step = (GEO.x1 - GEO.x0) / n;
+      const bw = Math.min(40, step * 0.5);
+      // ★ 柱底 = 左轴下限（= 图底 yBot）。**不是 0 点** —— 因为两根轴都不从 0 起，
+      //   「0」在图外，用它会算出超出画布的高度（踩过：曾得 403px > 画布 300px）。
+      const base = GEO.yBot;
+      return cells.map((c, i) => {
+        const cx = GEO.x0 + step * (i + 0.5);
+        const v = c ? c.net : ax.lo;
+        const yv = GEO.yBot - (v - ax.lo) / span * H;
+        const y = Math.min(yv, base);
+        const h = c ? Math.max(2, Math.abs(base - yv)) : 0;
+        const key = chartNearKeys.value[i];
+        return {
+          x: cx - bw / 2, y, w: bw, h, cx, v: c ? v.toFixed(0) : '—',
+          label: chartLabels.value[i],
+          cur: !!(c && c.isToday) ||
+               !!(L.value && L.value.ok && L.value.near === key),
+          isToday: !!(c && c.isToday),
+          holiday: !!(c && c.holiday),
+        };
+      });
+    });
+
+    // 「历史 | 本月」分隔虚线位置 = 最后一根柱的左边缘（只在有本月点时显示）
+    const sepX = computed(() => {
+      const barsArr = bars.value;
+      if (!todayCell.value || barsArr.length < 2) return 0;
+      const last = barsArr[barsArr.length - 1];
+      return last.x - 2;
+    });
+
+    // 统一的网格线：位置由左轴定，「左轴值」与「右轴值」同时算出来
+    const grid = computed(() => {
+      const na = netAxis.value, pa = pctAxis.value;
+      const nSpan = na.hi - na.lo || 1, pSpan = pa.hi - pa.lo || 1;
+      const out = [];
+      for (let i = 0; i < GRID_N; i++) {
+        const f = i / (GRID_N - 1);                      // 0 → 1（下 → 上）
+        const nv = na.lo + nSpan * f;
+        const pv = pa.lo + pSpan * f;
+        out.push({
+          y: GEO.yBot - f * H,
+          nv: nv.toFixed(0),
+          pv: pv.toFixed(1) + '%',
+        });
+      }
+      return out;
+    });
+    // 右轴刻度 = 同一组网格线（保证与左轴严丝合缝）
+    const gridR = computed(() => grid.value);
+    // 折线用右轴（pctAxis）映射
+    function pctY(v) {
+      const pa = pctAxis.value, pSpan = pa.hi - pa.lo || 1;
+      return GEO.yBot - (v - pa.lo) / pSpan * H;
+    }
+
+    const linePts = computed(() => pts().map(p => `${p.x},${p.y}`).join(' '));
+    const linePts2 = computed(() => pts());
+    function pts() {
+      const cells = chartCells.value;
+      if (!cells.length) return [];
+      const ax = pctAxis.value, span = ax.hi - ax.lo || 1;
+      const n = cells.length;
+      const step = (GEO.x1 - GEO.x0) / n;
+      return cells.map((c, i) => ({
+        x: GEO.x0 + step * (i + 0.5),
+        y: GEO.yBot - (((c && c.net_pct != null) ? c.net_pct : ax.lo) - ax.lo) / span * H,
+      }));
+    }
+
+    // ================= ②b 认沽隐含波动率（当月 / 次月两条腿） =================
+    // 复刻参考程序月报「二、认沽隐含波动率」：横轴同②区（过去 12 次月度到期），
+    // 纵轴 = IV(%)，两条线（当月腿 / 次月腿），**各自按本腿到期时间折算**。
+    //   数据来源：/api/window 的 series[].cells[t-1].iv_near / iv_far（T-N 跟随上方选择）。
+    //   ⚠️ 两腿的 T 不同（当月剩 N 个交易日、次月剩 N+约 35 个），正是"按本腿折算"的含义。
+    const IVGEO = { x0: 62, x1: 1052, yTop: 42, yBot: 258 };
+    const IVH = IVGEO.yBot - IVGEO.yTop;
+
+    const ivCells = computed(() => {
+      if (!(W.value && W.value.ok)) return [];
+      return W.value.series.map(s => {
+        const c = s.cells[t.value - 1];
+        return c ? { near: s.near, ivn: c.iv_near, ivf: c.iv_far } : null;
+      });
+    });
+
+    const ivScale = computed(() => {
+      const vals = [];
+      ivCells.value.forEach(c => {
+        if (c && c.ivn != null) vals.push(c.ivn);
+        if (c && c.ivf != null) vals.push(c.ivf);
+      });
+      if (!vals.length) return { lo: 0, hi: 50, step: 10 };
+      const lo = Math.min(...vals), hi = Math.max(...vals);
+      const span0 = Math.max(hi - lo, Math.abs(hi) * 0.15 || 1);
+      const step = niceStep(span0 * 1.25 / GRID_N);
+      const a = Math.max(0, Math.floor((lo - span0 * 0.06) / step) * step);
+      const b = Math.ceil((hi + span0 * 0.06) / step) * step;
+      return { lo: a, hi: b, step };
+    });
+
+    const ivGrid = computed(() => {
+      const ax = ivScale.value, span = ax.hi - ax.lo || 1;
+      const out = [];
+      for (let v = ax.lo; v <= ax.hi + ax.step * 0.001; v += ax.step) {
+        out.push({ v: Math.round(v * 10) / 10, y: IVGEO.yBot - (v - ax.lo) / span * IVH });
+      }
+      return out.reverse();
+    });
+
+    const ivBars = computed(() => {
+      const cells = ivCells.value;
+      if (!cells.length) return [];
+      const n = cells.length;
+      const step = (IVGEO.x1 - IVGEO.x0) / n;
+      return cells.map((c, i) => ({
+        cx: IVGEO.x0 + step * (i + 0.5),
+        label: (W.value.series[i].near || '').slice(0, 2) + '/' + (W.value.series[i].near || '').slice(2),
+      }));
+    });
+
+    function _ivPts(key) {
+      const ax = ivScale.value, span = ax.hi - ax.lo || 1;
+      const n = ivCells.value.length;
+      if (!n) return [];
+      const step = (IVGEO.x1 - IVGEO.x0) / n;
+      return ivCells.value.map((c, i) => {
+        const v = (c && c[key] != null) ? c[key] : null;
+        return {
+          x: IVGEO.x0 + step * (i + 0.5),
+          y: v == null ? null : IVGEO.yBot - (v - ax.lo) / span * IVH,
+          v,
+        };
+      });
+    }
+    const ivPtsNear = computed(() => _ivPts('ivn').filter(p => p.y != null));
+    const ivPtsFar = computed(() => _ivPts('ivf').filter(p => p.y != null));
+    // 折线：遇缺失点断开（分成多段），避免跨越缺失画直线
+    function _poly(pts, key) {
+      const all = _ivPts(key);
+      const segs = []; let cur = [];
+      all.forEach(p => {
+        if (p.y == null) { if (cur.length > 1) segs.push(cur); cur = []; }
+        else cur.push(p);
+      });
+      if (cur.length > 1) segs.push(cur);
+      return segs.map(s => s.map(p => `${p.x},${p.y}`).join(' ')).join(' ');
+    }
+    const ivLineNear = computed(() => _poly(null, 'ivn'));
+    const ivLineFar = computed(() => _poly(null, 'ivf'));
+
+    watch(t, () => {});
+    onMounted(async () => {
+      tickClock();
+      setInterval(tickClock, 1000);
+      await loadMeta();
+      reload();
+    });
+
+    return { variety, cp, offset, t, W, L, err, S, GEO, bars, grid, gridR, linePts, linePts2,
+             VARIETIES, vLabel,
+             todayCell, sepX, todayT, todayTAligned,
+             IVGEO, ivGrid, ivBars, ivPtsNear, ivPtsFar, ivLineNear, ivLineFar,
+             clock, todayLabel, MKT, mktText, updRunning, updDone, updMsg, doUpdate,
+             hrefOf,
+             f1, reload, setOffset };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>

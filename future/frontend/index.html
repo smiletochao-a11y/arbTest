@@ -1,0 +1,1638 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>股指贴水助手</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { max-width: 100%; overflow-x: hidden; }
+  body { background: #f2f5fa; color: #1f2937; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px; padding-bottom: 60px; }
+  .app { max-width: 640px; margin: 0 auto; }
+
+  /* 顶栏 */
+  .topbar { background: #fff; padding: 12px 16px; text-align: center; font-size: 16px; font-weight: 600; color: #1e293b;
+            box-shadow: 0 1px 4px rgba(0,0,0,.05); position: sticky; top: 0; z-index: 20; }
+  .topbar .sub { display: block; font-size: 11px; font-weight: 400; color: #94a3b8; margin-top: 3px; }
+
+  /* 品种切换 */
+  .vswitch { display: flex; gap: 6px; padding: 12px 12px 4px; }
+  .vswitch .vbtn { flex: 1 1 0; min-width: 0; padding: 9px 4px; text-align: center; border-radius: 8px; background: #fff;
+                   border: 1px solid #dbeafe; color: #2563eb; font-size: 13px; font-weight: 500; cursor: pointer;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .vswitch .vbtn.on { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+  /* 卡片 */
+  .card { background: #fff; border-radius: 10px; margin: 10px 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+  .card .hd { padding: 11px 14px; font-size: 14px; font-weight: 600; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; }
+  .card .hd .tag { margin-left: auto; font-size: 12px; font-weight: 400; color: #94a3b8; }
+  .card .bd { padding: 0; }
+
+  /* 表格 */
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #f8fafc; padding: 9px 8px; font-size: 12px; color: #64748b; font-weight: 500; text-align: right; white-space: nowrap; }
+  th:first-child { text-align: left; }
+  td { padding: 10px 8px; text-align: right; border-top: 1px solid #f8fafc; font-variant-numeric: tabular-nums; font-size: 13.5px; }
+  td:first-child { text-align: left; font-family: Consolas, monospace; color: #2563eb; font-weight: 600; }
+  .up { color: #ef4444; }
+  .down { color: #16a34a; }
+  .mut { color: #94a3b8; }
+
+  /* 分位参照专用色 —— 与曲线图例一一对应，三色差异最大化。
+     不用 .up/.down：那套是"涨红跌绿"的行情感，借用会让人误以为是涨跌。
+     绿 → 30%分位 / 青蓝 → 50%分位 / 红 → 75%分位。
+     50% 用青蓝 #0891b2 而非橙色 #d97706：橙与红太接近，肉眼难分辨；
+     也不与曲线本身的蓝 #2563eb 冲突。 */
+  .q-low  { color: #16a34a; }   /* 30%分位（低） */
+  .q-mid  { color: #0891b2; }   /* 50%分位（中） */
+  .q-high { color: #ef4444; }   /* 75%分位（高） */
+
+  /* 现货栏 */
+  .spotbar { display: flex; align-items: baseline; padding: 12px 14px; background: linear-gradient(90deg,#eff6ff,#fff); border-bottom: 1px solid #f1f5f9; }
+  .spotbar .nm { font-size: 15px; font-weight: 700; color: #1e293b; }
+  .spotbar .code { font-size: 11px; color: #94a3b8; margin-left: 6px; }
+  .spotbar .px { margin-left: auto; font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .updbar { padding: 5px 14px; background: #f8fafc; font-size: 11px; color: #94a3b8; border-bottom: 1px solid #f1f5f9; }
+  .updglobal { margin: 10px 12px 0; padding: 7px 12px; background: #fff; border-radius: 8px; font-size: 11.5px; color: #94a3b8;
+               display: flex; align-items: center; gap: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+  .dot-live { width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
+  .dot-live.live { background: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,.18); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+
+  /* 一键更新数据按钮 —— 并入 .updglobal 那一行，不额外占页面高度。
+     线上 allow_refresh=false 时按钮不渲染（v-if），那一行保持原样。 */
+  .ug-txt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rb-btn { flex: none; margin-left: 8px; padding: 3px 12px; font-size: 11.5px; color: #fff;
+            background: #2563eb; border: none; border-radius: 5px; cursor: pointer; font-family: inherit; }
+  .rb-btn:disabled { background: #cbd5e1; cursor: default; }
+  .rb-btn:active:not(:disabled) { background: #1d4ed8; }
+  .spotbar .chga { margin-left: 8px; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pctile { padding: 8px 14px; font-size: 12.5px; color: #64748b; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 6px; }
+  .pctile b { font-variant-numeric: tabular-nums; font-size: 14px; }
+  .lvtag { font-size: 11px; padding: 1px 7px; border-radius: 4px; }
+  .lv-high { color: #dc2626; } .lvtag.lv-high { background: #fee2e2; }
+  .lv-mid  { color: #d97706; } .lvtag.lv-mid  { background: #fef3c7; }
+  .lv-low  { color: #16a34a; } .lvtag.lv-low  { background: #dcfce7; }
+
+  /* 区间按钮 */
+  .seg { display: flex; gap: 6px; padding: 10px 12px 0; }
+  .seg .s { flex: 1 1 0; min-width: 0; padding: 7px 2px; text-align: center; border-radius: 7px; font-size: 13px; background: #fff;
+            border: 1px solid #e2e8f0; color: #64748b; cursor: pointer; white-space: nowrap; }
+  .seg .s.on { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+  /* 指标切换 */
+  .mseg { display: flex; gap: 6px; padding: 8px 12px 0; }
+  .mseg .m { flex: 1 1 0; min-width: 0; padding: 8px 2px; text-align: center; border-radius: 7px; font-size: 13px; background: #f1f5f9;
+             color: #64748b; cursor: pointer; white-space: nowrap; }
+  .mseg .m.on { background: #dbeafe; color: #1d4ed8; font-weight: 600; }
+
+  /* 统计块 */
+  .statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #f1f5f9; }
+  .statgrid .it { background: #fff; padding: 14px 12px; text-align: center; }
+  .statgrid .it .lb { font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
+  .statgrid .it .vl { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .statgrid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px; background: #f1f5f9; }
+  .statgrid3 .it { background: #fff; padding: 12px 8px; text-align: center; }
+  .statgrid3 .it .lb { font-size: 12px; color: #94a3b8; margin-bottom: 5px; }
+  .statgrid3 .it .vl { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* 图表 */
+  .chartbox { padding: 12px 8px 6px; }
+  canvas { width: 100%; height: 200px; display: block; }
+
+  /* 图例（曲线下方的色块说明） */
+  .legend { display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
+            gap: 6px 14px; padding: 4px 12px 10px; }
+  .legend .lg { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: #64748b; }
+  .legend .sw { display: inline-block; width: 12px; height: 3px; border-radius: 2px; }
+
+  /* 移仓品种分组 */
+  .mgroup { margin-top: 12px; }
+  .mghtitle { display: flex; align-items: baseline; padding: 0 14px 6px; }
+  .mghtitle .nm { font-size: 15px; font-weight: 500; color: #1e293b; }
+  .mghtitle .code { font-size: 11px; color: #94a3b8; margin-left: 6px; }
+
+  /* 移仓卡片 */
+  .pcard { margin: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; background: #fff; }
+  .pcard .ph { display: flex; align-items: center; padding: 10px 12px; background: #f8fafc; cursor: pointer; }
+  .pcard .ph .pnm { font-family: Consolas, monospace; font-size: 13.5px; font-weight: 700; color: #1e293b; }
+  .pcard .ph .gap { margin-left: 8px; font-size: 11px; padding: 1px 7px; border-radius: 4px; background: #e0e7ff; color: #4338ca; }
+  .pcard .ph .exp { margin-left: auto; font-size: 12px; color: #2563eb; }
+  .pcard .pb { display: grid; grid-template-columns: 1fr 1fr; }
+  .pcard .pb .l { padding: 12px; border-right: 1px solid #f1f5f9; }
+  .pcard .pb .r { padding: 12px; }
+  .pcard .pb .cap { font-size: 11px; color: #94a3b8; margin-bottom: 6px; }
+  .bigval { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pcbar { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .pill { font-size: 12px; padding: 2px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; font-weight: 600; }
+  .qrow { display: flex; justify-content: space-between; font-size: 12.5px; padding: 3px 0; color: #64748b; }
+  .qrow b { font-variant-numeric: tabular-nums; }
+  /* 「折合价差（点/月）」—— 辅助指标，弱化显示（小字 + 灰） */
+  .qrow .sub { font-size: 11px; opacity: .78; }
+  .note { padding: 9px 12px; font-size: 12px; background: #f8fafc; color: #64748b; border-top: 1px solid #f1f5f9; }
+  .warnbox { margin: 8px 12px; padding: 9px 12px; background: #fef3c7; color: #92400e; border-radius: 8px; font-size: 12px; }
+
+  /* 移仓助手 · 全合约对汇总表（横向对比，一眼挑出最划算的组合） */
+  .sumtable { margin: 8px 12px 4px; background: #fff; border: 1px solid #e8eef6; border-radius: 10px; overflow: hidden; }
+  .sumtable .sth { display: grid; grid-template-columns: 1.55fr .85fr .82fr .72fr .95fr;
+                   background: #f1f5f9; color: #64748b; font-size: 11px; font-weight: 600; }
+  .sumtable .sth > div { padding: 7px 6px; text-align: right; }
+  .sumtable .sth > div:first-child { text-align: left; padding-left: 12px; }
+  .sumtable .str { display: grid; grid-template-columns: 1.55fr .85fr .82fr .72fr .95fr;
+                   font-size: 12px; border-top: 1px solid #f1f5f9; cursor: pointer;
+                   font-variant-numeric: tabular-nums; align-items: center; }
+  .sumtable .str:hover { background: #f8fbff; }
+  .sumtable .str.on { background: #eff6ff; box-shadow: inset 3px 0 0 #2563eb; }
+  .sumtable .str > div { padding: 7px 6px; text-align: right; }
+  .sumtable .str > div:first-child { text-align: left; padding-left: 12px; font-weight: 600; color: #1e3a8a; }
+  /* 分位最高的一行：加"最优"角标 */
+  .sumtable .str .best { font-size: 10px; background: #dcfce7; color: #15803d; border-radius: 4px;
+                         padding: 1px 4px; margin-left: 5px; font-weight: 700; }
+  .sumtable .sfoot { padding: 6px 12px; font-size: 11px; color: #94a3b8; background: #fbfdff;
+                     border-top: 1px solid #f1f5f9; }
+
+  /* 保证金 · 详细计算表 */
+  .mgtable { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .mgtable .mrow { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1.15fr;
+                   padding: 8px 12px; border-top: 1px solid #f8fafc; align-items: center; }
+  .mgtable .mrow > div { text-align: right; }
+  .mgtable .mrow > div:first-child { text-align: left; color: #475569; }
+  .mgtable .mhead { background: #f1f5f9; color: #64748b; font-size: 11px; font-weight: 600;
+                    border-top: none; position: sticky; top: 0; }
+  .mgtable .mhead > div { text-align: right; }
+  .mgtable .mhead > div:first-child { text-align: left; }
+  /* 扛跌临界行（剩余归零）：整行淡红底，最醒目 */
+  .mgtable .mrow.last { background: #fef2f2; font-weight: 700; }
+
+  /* 保证金 */
+  .form { padding: 12px 14px; }
+  .frow { display: flex; align-items: center; padding: 9px 0; border-bottom: 1px solid #f8fafc; }
+  .frow label { width: 108px; font-size: 13.5px; color: #475569; }
+  .frow input, .frow select { flex: 1; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 7px; font-size: 14px;
+                              text-align: right; font-variant-numeric: tabular-nums; outline: none; background: #fbfdff; }
+  .frow .unit { margin-left: 8px; font-size: 12px; color: #94a3b8; width: 20px; }
+  .btnrow { display: flex; gap: 10px; padding: 14px; }
+  .btn { flex: 1; padding: 12px 0; border-radius: 8px; border: none; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .btn.primary { background: #2563eb; color: #fff; }
+  .btn.plain { background: #f1f5f9; color: #475569; }
+  .result { margin: 0 14px 14px; padding: 14px; background: #f0f9ff; border-radius: 8px; }
+  .result .rr { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13.5px; }
+  .result .rr b { font-variant-numeric: tabular-nums; }
+
+  /* 底部导航 */
+  .tabbar { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; display: flex;
+            border-top: 1px solid #eef2f7; padding-bottom: env(safe-area-inset-bottom); z-index: 30; }
+  .tabbar .t { flex: 1 1 0; min-width: 0; text-align: center; padding: 11px 0 9px; font-size: 12px; color: #94a3b8; cursor: pointer; white-space: nowrap; }
+  .tabbar .t.on { color: #2563eb; font-weight: 600; }
+  .tabbar .t .dot { display: block; width: 5px; height: 5px; border-radius: 50%; background: #2563eb;
+                    margin: 0 auto 3px; opacity: 0; }
+  .tabbar .t.on .dot { opacity: 1; }
+
+  .loading, .empty { text-align: center; padding: 40px 20px; color: #94a3b8; font-size: 13px; }
+  /* 加载失败态：比普通 loading 更醒目，配一个重试按钮，避免用户对着转圈干等 */
+  .loading.err { color: #dc2626; }
+  .retry-btn {
+    padding: 7px 18px; font-size: 13px; color: #fff; background: #3b82f6;
+    border: none; border-radius: 6px; cursor: pointer;
+  }
+  .retry-btn:active { background: #2563eb; }
+  .disclaimer { padding: 14px 20px 24px; font-size: 11px; color: #b6c2d2; line-height: 1.7; text-align: center; }
+</style>
+</head>
+<body>
+<div id="app" class="app">
+  <div class="topbar">
+    股指贴水助手
+    <span class="sub">{{ metaText }}</span>
+  </div>
+
+  <!-- ============ Tab 1: 基差看板（四品种罗列，无需切换） ============ -->
+  <div v-show="tab==='basis'">
+    <div class="updglobal" v-if="basisTime">
+      <span class="dot-live" :class="{live: isTrading && !refreshing}"></span>
+      <span class="ug-txt">{{ refreshMsg || ((isTrading ? '交易中，每 5 秒刷新' : '非交易时段，数据为最近一次快照') + ' · ' + basisTime) }}</span>
+      <button class="rb-btn" v-if="allowRefresh" :disabled="refreshing" @click="startRefresh">
+        {{ refreshing ? '更新中…' : '更新数据' }}
+      </button>
+    </div>
+
+    <div class="card" v-for="g in groups" :key="g.variety">
+      <div class="spotbar">
+        <span class="nm">{{ g.name }}</span>
+        <span class="code">{{ g.variety }}</span>
+        <span class="px">{{ fmt(g.spot.price,2) }}</span>
+        <span class="chg" :class="(g.spot.change_pct||0)>=0?'up':'down'">
+          {{ g.spot.change_pct!=null?(g.spot.change_pct>=0?'+':'')+fmt(g.spot.change_pct,2)+'%':'' }}
+        </span>
+        <span class="chga" :class="(g.spot.change||0)>=0?'up':'down'">
+          {{ g.spot.change!=null?(g.spot.change>=0?'+':'')+fmt(g.spot.change,2):'' }}
+        </span>
+      </div>
+      <div class="pctile" v-if="g.pctile">
+        当前点位近{{ g.pctile.years }}年分位
+        <b :class="'lv-'+g.pctile.level">{{ fmt(g.pctile.percentile,1) }}%</b>
+        <span class="lvtag" :class="'lv-'+g.pctile.level">{{ g.pctile.level_text }}</span>
+      </div>
+      <div class="bd">
+        <table>
+          <thead><tr>
+            <th>合约</th><th>价格</th><th>日内</th><th>涨跌额</th><th>剩余天</th><th>基差</th><th>折合年化</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="r in g.rows" :key="r.symbol">
+              <td>{{ r.symbol }}</td>
+              <td>{{ fmt(r.price,1) }}</td>
+              <td :class="(r.change_pct||0)>=0?'up':'down'">{{ r.change_pct!=null?fmt(r.change_pct,2)+'%':'-' }}</td>
+              <td :class="(r.change||0)>=0?'up':'down'">{{ r.change!=null?fmt(r.change,1):'-' }}</td>
+              <td class="mut">{{ r.days_left }}</td>
+              <td :class="r.basis>=0?'up':'down'">{{ fmt(r.basis,2) }}</td>
+              <td :class="r.annual>=0?'up':'down'">{{ r.annual!=null?fmt(r.annual,2)+'%':'-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 加载态：加超时上限，失败时给明确提示 + 重试按钮，绝不无限转圈 -->
+    <div class="loading" v-if="!groups.length && !fetchErr">加载中...</div>
+    <div class="loading err" v-if="!groups.length && fetchErr">
+      {{ fetchErr }}
+      <div style="margin-top:10px">
+        <button class="retry-btn" @click="retryBasis">点击重试</button>
+      </div>
+    </div>
+
+    <div class="disclaimer">
+      基差 = 现货价 − 期货价，正数表示贴水。<br>
+      折合年化 = (基差 / 现货价) × (365 / 剩余天数) × 100%<br>
+      点位分位 = 当前指数点位在近3年历史中的位置。<br>
+      数据源：新浪财经实时行情。
+    </div>
+  </div>
+
+  <!-- ============ Tab 2: 历史贴水 ============ -->
+  <div v-show="tab==='hist'">
+    <div class="vswitch">
+      <div class="vbtn" v-for="v in varieties" :class="{on: hist.variety===v.code}" @click="loadHist(v.code, hist.years)">
+        {{ v.code }} {{ v.name }}
+      </div>
+    </div>
+
+    <div class="seg">
+      <div class="s" v-for="y in ranges" :class="{on: hist.years===y.v}" @click="loadHist(hist.variety, y.v)">{{ y.n }}</div>
+    </div>
+
+    <div class="mseg">
+      <div class="m" :class="{on: hist.metric==='annual'}" @click="setMetric('annual')">年化收益率</div>
+      <div class="m" :class="{on: hist.metric==='basis'}" @click="setMetric('basis')">基差</div>
+      <div class="m" :class="{on: hist.metric==='spot'}" @click="setMetric('spot')">指数收盘价</div>
+    </div>
+
+    <div class="updglobal" v-if="histLive">
+      <span class="dot-live" :class="{live: histTrading && !refreshing}"></span>
+      <span class="ug-txt">{{ refreshMsg || ('当前值取实时价，每 5 秒刷新 · ' + histTime) }}</span>
+      <button class="rb-btn" v-if="allowRefresh" :disabled="refreshing" @click="startRefresh">
+        {{ refreshing ? '更新中…' : '更新数据' }}
+      </button>
+    </div>
+
+    <div class="card" v-if="cur">
+      <div class="statgrid">
+        <div class="it">
+          <div class="lb">{{ metricLabel }}</div>
+          <div class="vl" :class="cur.current>=0?'up':'down'">
+            {{ cur.current!=null?fmt(cur.current,2)+metricUnit:'-' }}
+          </div>
+        </div>
+        <div class="it">
+          <div class="lb">历史百分位</div>
+          <div class="vl">{{ cur.percentile!=null?fmt(cur.percentile,1)+'%':'-' }}</div>
+        </div>
+      </div>
+      <div class="statgrid3">
+        <div class="it"><div class="lb q-low">25%分位</div><div class="vl q-low">{{ cur.q25!=null?fmt(cur.q25,2)+metricUnit:'-' }}</div></div>
+        <div class="it"><div class="lb q-mid">中位数</div><div class="vl q-mid">{{ cur.q50!=null?fmt(cur.q50,2)+metricUnit:'-' }}</div></div>
+        <div class="it"><div class="lb q-high">75%分位</div><div class="vl q-high">{{ cur.q75!=null?fmt(cur.q75,2)+metricUnit:'-' }}</div></div>
+      </div>
+      <div class="note">
+        基准合约：{{ hist.stats?hist.stats.cur_symbol:'-' }}（每个交易日滚动取当前第2近月）<span v-if="histLive"> · 当前值含实时价</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="hd">{{ metricName }}走势 <span class="tag">{{ cur?cur.start+' ~ '+cur.end:'' }}</span></div>
+      <div class="chartbox"><canvas ref="histCanvas"></canvas></div>
+      <div class="legend">
+        <span class="lg"><i class="sw" :style="{background: hist.metric==='spot'?'#0f766e':'#2563eb'}"></i>{{ metricName }}</span>
+        <span class="lg"><i class="sw" style="background:#16a34a"></i>25%分位</span>
+        <span class="lg"><i class="sw" style="background:#0891b2"></i>中位数</span>
+        <span class="lg"><i class="sw" style="background:#ef4444"></i>75%分位</span>
+      </div>
+      <div class="note" v-if="cur">
+        样本 {{ cur.sample }} 个交易日（不含实时点），基准合约为「次月合约」（每个交易日滚动取当前第2近月）。<br>
+        百分位 = 历史上低于当前值的占比。
+      </div>
+    </div>
+
+    <div class="disclaimer">
+      历史曲线为日线收盘价；末端的圆点为实时点（未收盘时的即时值）。<br>
+      未剔除成分股分红影响，实际基差可能略有差异。
+    </div>
+  </div>
+
+  <!-- ============ Tab 3: 移仓助手（四品种 TAB 切换） ============ -->
+  <div v-show="tab==='move'">
+    <div class="updglobal" v-if="moveTime">
+      <span class="dot-live" :class="{live: moveTrading && !refreshing}"></span>
+      <span class="ug-txt">{{ refreshMsg || ((moveLive ? (moveTrading ? '实时价差，每 5 秒刷新' : '非交易时段，数据为最近一次快照') : '日线数据') + ' · ' + moveTime) }}</span>
+      <button class="rb-btn" v-if="allowRefresh" :disabled="refreshing" @click="startRefresh">
+        {{ refreshing ? '更新中…' : '更新数据' }}
+      </button>
+    </div>
+
+    <div class="warnbox">
+      价差 = 近月 − 远月，正数表示远月更便宜（贴水）。<b>分位越高，说明当前贴水越厚，移仓拿到的收益越多。</b>
+    </div>
+
+    <!-- 铁矿石口径注：只在选中铁矿石时出现。它与股指有三处不同（月份数/主力/单位），
+         不写清楚会被当成「和股指一样的当月合约基差」误读。见 docs/009 差异 1。 -->
+    <div class="warnbox" v-if="moveVariety==='i'">
+      铁矿石口径：同时挂 <b>12 个月份</b>（不是股指的 4 个），<b>主力只在 01 / 05 / 09 之间轮换</b>，
+      距到期 1~4 个月，与股指「当月合约」不是一回事 —— 实际移仓看<b>跨 4 月档</b>（如 i2701 → i2705）。
+      价格单位是<b>元/吨</b>，不是点。
+    </div>
+
+    <!-- 品种 TAB：一次只显示一个品种，避免一页过长 -->
+    <div class="vswitch">
+      <div class="vbtn" v-for="v in moveVarieties" :class="{on: moveVariety===v.code}" @click="setMoveVariety(v.code)">
+        {{ v.code }} {{ v.name }}
+      </div>
+    </div>
+
+    <!-- 汇总表：横向对比本品种全部合约对，一眼挑出最划算的组合 -->
+    <div class="sumtable" v-if="moveCur && moveCur.rows.length">
+      <div class="sth">
+        <div>合约对</div><div>价差({{ moveUnit }})</div><div>年化</div><div>分位</div><div>折合({{ moveUnit }}/月)</div>
+      </div>
+      <div class="str" v-for="p in moveCur.rows" :key="'r'+p.near+p.far"
+           :class="{on: expanded===p.near+p.far}" @click="onRowClick(p)">
+        <div>
+          {{ p.near }}-{{ p.far }}
+          <span class="best" v-if="bestPair && bestPair.near+p.far===p.near+p.far">最优</span>
+        </div>
+        <div :class="p.spread>=0?'up':'down'">{{ p.spread>=0?'+':'' }}{{ fmt(p.spread,2) }}</div>
+        <div :class="p.annual>=0?'up':'down'">{{ p.annual!=null?(p.annual>=0?'+':'')+fmt(p.annual,2)+'%':'-' }}</div>
+        <div>{{ p.percentile!=null?fmt(p.percentile,1)+'%':'-' }}</div>
+        <div>{{ p.month_gap>0?fmt(p.spread/p.month_gap,2):'-' }}</div>
+      </div>
+      <div class="sfoot">
+        口径：价差 = 近月 − 远月（正数=远月更便宜/贴水）；年化与分位均取<b>近1年</b>，
+        分位基准为「同类合约对合并」（如历史所有跨1月组合）。点任意一行可跳到下方详情。
+      </div>
+    </div>
+
+    <div class="mgroup" v-if="moveCur" :key="moveCur.variety">
+      <div class="mghtitle">
+        <span class="nm">{{ moveCur.name }}</span>
+        <span class="code">{{ moveCur.variety }}</span>
+      </div>
+      <div class="pcard" v-for="p in moveCur.rows" :key="p.near+p.far" :data-key="p.near+p.far">
+        <div class="ph" @click="togglePair(moveCur.variety, p)">
+          <span class="pnm">{{ p.near }} - {{ p.far }}</span>
+          <span class="gap">跨{{ p.month_gap }}月</span>
+          <span class="exp">{{ expanded===p.near+p.far?'收起 ▲':'点击展开详情 ▼' }}</span>
+        </div>
+        <div class="pb">
+          <div class="l">
+            <div class="cap">当前价差（{{ moveUnit }}）</div>
+            <div class="bigval" :class="p.spread>=0?'up':'down'">{{ fmt(p.spread,2) }}</div>
+            <div class="qrow" style="margin-top:6px"><span>折合年化</span><b :class="p.annual>=0?'up':'down'">{{ p.annual!=null?fmt(p.annual,2)+'%':'-' }}</b></div>
+            <div class="qrow"><span class="sub">折合价差</span><b class="sub" :class="p.spread>=0?'up':'down'">{{ p.month_gap>0?fmt(p.spread/p.month_gap,2)+' '+moveUnit+'/月':'-' }}</b></div>
+          </div>
+          <div class="r">
+            <div class="cap">历史分位参照（近1年）</div>
+            <div class="pcbar"><span class="pill">{{ p.percentile!=null?fmt(p.percentile,1)+'%':'n/a' }}</span><span style="font-size:11px;color:#94a3b8">当前分位</span></div>
+            <div class="qrow"><span class="q-low">30%分位</span><b class="q-low">{{ p.q30 }}</b></div>
+            <div class="qrow"><span class="q-mid">50%分位</span><b class="q-mid">{{ p.q50 }}</b></div>
+            <div class="qrow"><span class="q-high">75%分位</span><b class="q-high">{{ p.q75 }}</b></div>
+          </div>
+        </div>
+        <div class="note" v-if="p.basis_src==='merged'">
+          近1年历史分位 {{ fmt(p.percentile,1) }}%（样本 {{ p.sample }} 天，同类合约对合并）
+        </div>
+        <div class="note" v-else style="background:#fef3c7;color:#92400e">
+          样本仅 {{ p.sample }} 天（无同类合约对可合并），分位参考意义有限。
+        </div>
+
+        <!-- 展开区 -->
+        <div v-if="expanded===p.near+p.far && p.series && p.series.length">
+          <div class="chartbox"><canvas :ref="el => setPairCanvas(p.near+p.far, el)"></canvas></div>
+          <div class="legend">
+            <span class="lg"><i class="sw" style="background:#2563eb"></i>历史价差</span>
+            <span class="lg"><i class="sw" style="background:#16a34a"></i>30%分位</span>
+            <span class="lg"><i class="sw" style="background:#0891b2"></i>50%分位</span>
+            <span class="lg"><i class="sw" style="background:#ef4444"></i>75%分位</span>
+          </div>
+          <div class="statgrid3" style="border-top:1px solid #f1f5f9;grid-template-columns:1fr 1fr 1fr 1fr">
+            <div class="it"><div class="lb q-low">30%分位</div><div class="vl q-low">{{ p.q30 }}</div></div>
+            <div class="it"><div class="lb q-mid">50%分位</div><div class="vl q-mid">{{ p.q50 }}</div></div>
+            <div class="it"><div class="lb q-high">75%分位</div><div class="vl q-high">{{ p.q75 }}</div></div>
+            <div class="it"><div class="lb">折合价差</div><div class="vl" :class="p.spread>=0?'up':'down'">{{ p.month_gap>0?fmt(p.spread/p.month_gap,2):'-' }}</div><div class="lb" style="margin:3px 0 0">{{ moveUnit }}/月</div></div>
+          </div>
+          <div class="note">均价 {{ p.mean }} · 历史样本 {{ p.sample }} 天</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="loading" v-if="!moveGroups.length">加载中...</div>
+
+    <div class="disclaimer">
+      移仓存在风险，请谨慎甄别。<br>
+      未考虑分红影响，换远月合约时请注意真实价差。<br>
+      合约对的分位基准采用「同类合约对合并」（如历史所有跨1月组合）。
+    </div>
+  </div>
+
+  <!-- ============ Tab 5: 铁矿石 ============ -->
+  <div v-show="tab==='iron'">
+    <div class="updglobal" v-if="iron.series.length">
+      <span class="dot-live" :class="{live: isTrading && !refreshing}"></span>
+      <span class="ug-txt">{{ refreshMsg || ('数据生成于 ' + ironBuilt + ' · 现货为反推值') }}</span>
+      <button class="rb-btn" v-if="allowRefresh" :disabled="refreshing" @click="startRefresh">
+        {{ refreshing ? '更新中…' : '更新数据' }}
+      </button>
+    </div>
+
+    <div class="warnbox">
+      <b>现货价是反推出来的</b>（现货 = 主力期货 ÷ (1 − 基差率/100)），基差率取自生意社
+      2014–2026 逐日序列，期货价取自本库。口径已用生意社采样点校验：
+      <b>80 个点平均误差 0.02 元/吨</b>。主力 = 持仓量最大的合约；最近合约 = 最近交割月。
+    </div>
+
+    <div class="vswitch">
+      <div class="vbtn" v-for="y in ironRanges" :class="{on: iron.years===y.v}" @click="loadIron(y.v)">{{ y.n }}</div>
+    </div>
+
+    <!-- 图1：价格（现货 / 最近合约 / 主力合约） -->
+    <div class="card">
+      <div class="hd">价格走势 <span class="tag">{{ ironSpan }}</span></div>
+      <div class="chartbox"><canvas ref="ironPriceCanvas"></canvas></div>
+      <div class="legend">
+        <span class="lg"><i class="sw" style="background:#0f766e"></i>现货</span>
+        <span class="lg"><i class="sw" style="background:#f59e0b"></i>最近合约</span>
+        <span class="lg"><i class="sw" style="background:#2563eb"></i>主力合约</span>
+      </div>
+      <div class="note" v-if="ironLast">
+        最新 {{ ironLast.date }}：现货 <b>{{ fmt(ironLast.spot,2) }}</b> ·
+        主力 {{ ironLast.main_sym }} <b>{{ fmt(ironLast.main_close,2) }}</b> ·
+        最近 {{ ironLast.near_sym }} <b>{{ fmt(ironLast.near_close,2) }}</b>（元/吨）
+      </div>
+    </div>
+
+    <!-- 图2：主力基差率 -->
+    <div class="card">
+      <div class="hd">主力基差率 <span class="tag">{{ ironSpan }}</span></div>
+      <div class="chartbox"><canvas ref="ironBasisCanvas"></canvas></div>
+      <div class="legend">
+        <span class="lg"><i class="sw" style="background:#7c3aed"></i>主力基差率（%）</span>
+        <span class="lg" style="color:#94a3b8">虚线 = 0（上为正=贴水，下为负=升水）</span>
+      </div>
+      <div class="note" v-if="ironLast">
+        最新：主力基差 <b :class="ironLast.basis>=0?'up':'down'">{{ fmt(ironLast.basis,2) }}</b> 元/吨 ·
+        基差率 <b :class="ironLast.basis_rate>=0?'up':'down'">{{ fmt(ironLast.basis_rate,2) }}%</b>
+      </div>
+    </div>
+
+    <!-- 图3：历史年度对比（14 年） -->
+    <div class="card">
+      <div class="hd">历史年度对比 · 主力基差率 <span class="tag">{{ annualSpan }}</span></div>
+      <div class="chartbox" style="padding-bottom:0"><canvas ref="ironAnnualCanvas" style="height:260px"></canvas></div>
+      <div class="legend">
+        <span class="lg"><i class="sw" style="background:#ef4444"></i>{{ thisYear }}（今年）</span>
+        <span class="lg"><i class="sw" style="background:rgba(100,116,139,.45)"></i>2013–{{ thisYear-1 }}</span>
+      </div>
+      <div class="note">
+        横轴为自然日（1 月 → 12 月），每年一条曲线，看的是<b>季节性形状</b>；
+        与上面「按时间轴连续」的图不是一回事。
+      </div>
+    </div>
+
+    <div class="loading" v-if="iron.loading">加载中...</div>
+    <div class="loading err" v-if="iron.err">{{ iron.err }}</div>
+
+    <div class="disclaimer">
+      现货 = 主力期货 ÷ (1 − 基差率/100)，由生意社基差率反推，非生意社原始报价。<br>
+      2026-07-15 起生意社基差率改为滞后 2 天发布，本页已做修正（修正前最大误差 21 元/吨，修正后 ≤0.04）。<br>
+      数据仅供参考，不构成任何投资建议。
+    </div>
+  </div>
+
+  <!-- ============ Tab 4: 保证金 ============ -->
+  <div v-show="tab==='margin'">
+    <div class="card">
+      <div class="hd">股指期货保证金计算器</div>
+      <div class="form">
+        <div class="frow">
+          <label>合约品种</label>
+          <select v-model="mg.variety">
+            <option v-for="v in varieties" :value="v.code">{{ v.code }} {{ v.name }}（乘数{{ v.mult }}）</option>
+          </select>
+        </div>
+        <div class="frow">
+          <label>买入指数点位</label>
+          <input v-model.number="mg.point" type="number" inputmode="decimal"
+                 @input="mg.pointEdited = true" placeholder="如 6000">
+          <span class="unit">点</span>
+        </div>
+        <div class="frow">
+          <label>本金</label>
+          <input v-model.number="mg.capital" type="number" inputmode="decimal" placeholder="如 50">
+          <span class="unit">万</span>
+        </div>
+        <div class="frow">
+          <label>保证金比例</label>
+          <input v-model.number="mg.ratio" type="number" inputmode="decimal" placeholder="如 12">
+          <span class="unit">%</span>
+        </div>
+        <div class="frow">
+          <label>持仓手数</label>
+          <input v-model.number="mg.lots" type="number" inputmode="numeric" placeholder="如 1">
+          <span class="unit">手</span>
+        </div>
+      </div>
+      <div class="btnrow">
+        <button class="btn primary" @click="calcMargin">计算</button>
+        <button class="btn plain" @click="resetMargin">重置</button>
+      </div>
+
+      <div class="result" v-if="mg.result">
+        <div class="statgrid">
+          <div class="it">
+            <div class="lb">最大可承受下跌</div>
+            <div class="vl" :class="mg.result.maxDrop!=null?'up':'mut'">
+              {{ mg.result.maxDrop!=null?fmt(mg.result.maxDrop*100,2)+'%':'—' }}
+            </div>
+          </div>
+          <div class="it">
+            <div class="lb">可支撑指数点位</div>
+            <div class="vl">{{ mg.result.supportPt!=null?fmt(mg.result.supportPt,1):'—' }}</div>
+          </div>
+        </div>
+        <div class="statgrid3">
+          <div class="it"><div class="lb">单手合约价值</div><div class="vl" style="font-size:14px">{{ fmt(mg.result.notional,0) }}</div></div>
+          <div class="it"><div class="lb">单手保证金</div><div class="vl" style="font-size:14px;color:#2563eb">{{ fmt(mg.result.marginOne,0) }}</div></div>
+          <div class="it"><div class="lb">杠杆率</div><div class="vl" style="font-size:14px;color:#d97706">{{ fmt(mg.result.leverage,2) }} 倍</div></div>
+        </div>
+        <div class="note" v-if="mg.result.maxDrop!=null">
+          {{ mg.variety }} 从 {{ fmt(mg.point,0) }} 点测算，{{ fmt(mg.capital,2) }} 万本金、
+          {{ mg.result.lots }} 手，可支撑到 {{ fmt(mg.result.supportPt,1) }} 点
+          （跌 {{ fmt(mg.result.maxDrop*100,2) }}%）。当前杠杆率 {{ fmt(mg.result.leverage,2) }} 倍。
+        </div>
+        <div class="note" v-else>
+          本金不足以持有 {{ mg.result.lots }} 手（单手保证金 {{ fmt(mg.result.marginOne,0) }} 元）。
+          按满仓可开 {{ mg.result.maxLots }} 手。
+        </div>
+      </div>
+    </div>
+
+    <!-- 详细计算表 -->
+    <div class="card" v-if="mg.result && mg.result.rows.length">
+      <div class="hd">详细计算表</div>
+      <div class="mgtable">
+        <div class="mrow mhead">
+          <div>下跌比例</div><div>指数点位</div><div>浮动盈亏</div><div>保证金</div><div>保证金外剩余</div>
+        </div>
+        <div class="mrow" v-for="r in mg.result.rows" :key="r.pct"
+             :class="{last: r.isLast}">
+          <div>{{ fmt(r.pct,2) }}%<span v-if="r.isLast" style="font-size:10px;background:#fecaca;color:#b91c1c;border-radius:4px;padding:1px 4px;margin-left:4px">临界</span></div>
+          <div>{{ fmt(r.price,1) }}</div>
+          <div class="up">{{ fmt(r.loss,0) }}</div>
+          <div>{{ fmt(r.margin,0) }}</div>
+          <div :class="r.left>=0?'down':'up'">{{ fmt(r.left,0) }}</div>
+        </div>
+      </div>
+      <div class="note">
+        金额单位：元。按<b>动态保证金</b>测算（保证金随指数下跌而减少），
+        为理论上限；实际交易所有最低保证金规则，亏损会触发追保，不会真的扛到该位置。
+      </div>
+    </div>
+
+    <div class="disclaimer">
+      保证金 = 指数点位 × 合约乘数 × 保证金比例。<br>
+      实际比例以期货公司为准（通常交易所标准 + 2~3 个点）。<br>
+      数据与计算仅供参考，不构成任何投资建议。
+    </div>
+  </div>
+
+  <!-- 底部导航 -->
+  <div class="tabbar">
+    <div class="t" :class="{on:tab==='basis'}" data-tab="basis" @click="switchTab('basis')"><span class="dot"></span>基差看板</div>
+    <div class="t" :class="{on:tab==='hist'}" data-tab="hist" @click="switchTab('hist')"><span class="dot"></span>历史贴水</div>
+    <div class="t" :class="{on:tab==='move'}" data-tab="move" @click="switchTab('move')"><span class="dot"></span>移仓助手</div>
+    <div class="t" :class="{on:tab==='iron'}" data-tab="iron" @click="switchTab('iron')"><span class="dot"></span>铁矿石</div>
+    <div class="t" :class="{on:tab==='margin'}" data-tab="margin" @click="switchTab('margin')"><span class="dot"></span>保证金</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+<script>
+// API 基地址与前缀处理（**这里踩过坑，改动前务必读完**）：
+//
+// 调用处统一写成 get('/api/xxx')，两种环境都要能落到后端的 /api/xxx。
+//   本地：服务本身就是后端（127.0.0.1:8103），直接用 '/api/xxx' 即可。
+//   ARM ：页面在 nginx 静态目录，后端挂在 /future_api/，且 nginx 的规则是
+//            location /future_api/ { proxy_pass http://127.0.0.1:8103/api/; }
+//          —— 也就是说 nginx 会把 /future_api/ 这段**替换成** /api/。
+//          所以 ARM 上必须发 /future_api/xxx（去掉调用处的 /api），
+//          最终后端收到 /api/xxx。
+//
+// ⚠️ 曾经的错误写法（2026-09-24，导致线上一直"实时行情获取失败"）：
+//      const API = location.pathname.startsWith('/future') ? '/future_api' : location.origin;
+//      fetch(API + path)          // path = '/api/realtime_all'
+//    ARM 上拼出 /future_api/api/realtime_all → nginx 转成 /api/api/realtime_all → 404。
+//   根因：前缀替换和 path 自带的 /api 叠了两次。现在由 requestUrl() 统一剥掉，杜绝复发。
+function requestUrl(path) {
+  const onArm = location.pathname.startsWith('/future');
+  if (!onArm) return path;                       // 本地：'/api/xxx' 原样
+  // ARM：把开头的 '/api' 换成 '/future_api'（只换一次，不能简单相加）
+  return path.startsWith('/api')
+    ? '/future_api' + path.slice(4)              // '/api/x' -> '/future_api/x'
+    : '/future_api' + path;
+}
+const { createApp, reactive, ref, onMounted, nextTick, watch } = Vue;
+
+function fmt(v, d) {
+  if (v === null || v === undefined || isNaN(v)) return '-';
+  return Number(v).toFixed(d === undefined ? 2 : d);
+}
+// ---- 请求层 ----
+// 踩过的坑（2026-09-24 线上事故）：原来这里只有两行裸 fetch，没有任何超时和兜底。
+// 首屏并发打 5 个请求（meta + 4×realtime），只要任意一个卡住，
+// Promise.all 就整体挂起，页面永远停在"数据加载中"——不是慢，是根本出不来。
+// 对照参考：oil_rt.html 只发 1 个请求且有 try/catch，所以用户从没遇到问题。
+// 现在：① 强制超时，到点就 Abort；② 任何异常都返回 {ok:false}，由调用方决定怎么显示。
+// 超时上限的取值依据（2026-09-24 实测，别再凭感觉改）：
+//   ARM 本机 → <1.1s
+//   经 Cloudflare 外网 → 3.8 ~ 10.7s（8 次实测）
+// 所以不能用 8 秒（会掐掉约 1/4 的正常响应，表现就是"有页面但没数据"）。
+// 取 20 秒：留足余量，同时仍然远小于"用户以为坏了"的心理阈值。
+const REQ_TIMEOUT = 20000;
+
+async function get(path, ms) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms === undefined ? REQ_TIMEOUT : ms);
+  try {
+    const r = await fetch(requestUrl(path), { signal: ctrl.signal });
+    if (!r.ok) return { ok: false, error: 'HTTP ' + r.status };
+    return await r.json();
+  } catch (e) {
+    // abort / 网络错误 / JSON 解析失败，全部归一成 {ok:false}
+    const isTimeout = (e && e.name === 'AbortError');
+    return { ok: false, error: isTimeout ? 'timeout' : String((e && e.message) || e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 带重试的请求：慢链路（CF 回源漂移）下首包偶发失败/超时很常见，
+// 自动重试一次能挡掉绝大部分偶发抖动，用户不用手动点重试。
+async function getRetry(path, ms, times) {
+  const n = times === undefined ? 2 : times;
+  let last = null;
+  for (let i = 0; i < n; i++) {
+    last = await get(path, ms);
+    if (last && last.ok) return last;
+    if (i < n - 1) await new Promise(r => setTimeout(r, 600));  // 短暂退避
+  }
+  return last;
+}
+
+// POST 版：用于「一键更新数据」。与 get 同样强制超时 + 兜底，
+// 额外一点：失败时尽量把后端返回的 error 文案取出来（403 会带说明）。
+async function post(path, ms) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms === undefined ? REQ_TIMEOUT : ms);
+  try {
+    const r = await fetch(requestUrl(path), { method: 'POST', signal: ctrl.signal });
+    if (!r.ok) {
+      let msg = 'HTTP ' + r.status;
+      try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (e) {}
+      return { ok: false, error: msg };
+    }
+    return await r.json();
+  } catch (e) {
+    const isTimeout = (e && e.name === 'AbortError');
+    return { ok: false, error: isTimeout ? 'timeout' : String((e && e.message) || e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+createApp({
+  setup() {
+    // 支持通过 ?tab=basis|hist|move|margin 直达某个 Tab（便于分享链接）
+    const _initTab = (new URLSearchParams(location.search).get('tab') || 'basis');
+    const _validTabs = ['basis', 'hist', 'move', 'iron', 'margin'];
+    const tab = ref(_validTabs.includes(_initTab) ? _initTab : 'basis');
+    const varieties = reactive([
+      {code:'IC', name:'中证500', mult:200},
+      {code:'IM', name:'中证1000', mult:200},
+      {code:'IF', name:'沪深300', mult:300},
+      {code:'IH', name:'上证50', mult:300},
+    ]);
+    // 移仓助手可切换的品种：比全局 varieties 多一个**铁矿石**。
+    // 铁矿石目前只接好了「数据层 + 移仓助手」（docs/009 §6 第二、三步），
+    // 历史贴水页 / 基差看板还没接 → **不能进全局 varieties**，
+    // 否则那两页会多出一个点进去是空表的 TAB。
+    // 另外单位不同：股指是「点」，铁矿石是「元/吨」，靠 unit 字段区分（模板里显示 moveUnit）。
+    const moveVarieties = [
+      {code:'IC', name:'中证500',  mult:200, unit:'点'},
+      {code:'IM', name:'中证1000', mult:200, unit:'点'},
+      {code:'IF', name:'沪深300',  mult:300, unit:'点'},
+      {code:'IH', name:'上证50',   mult:300, unit:'点'},
+      {code:'i',  name:'铁矿石',   mult:100, unit:'元/吨'},
+    ];
+    const ranges = [{v:1,n:'近1年'},{v:3,n:'近3年'},{v:5,n:'近5年'},{v:0,n:'全部'}];
+    const metaText = ref('数据加载中...');
+    // ---- 一键更新数据（仅本机；线上 allow_refresh=false 时整条不渲染）----
+    // 抓取要跑几分钟（枚举 4 个品种共 600 个候选合约），所以必须异步 + 轮询进度，
+    // 不能同步等 —— 前端 20 秒就超时了。
+    const allowRefresh = ref(false);
+    const refreshing = ref(false);
+    const refreshMsg = ref('');
+    let refreshTimer = null;
+
+    async function loadMeta() {
+      try {
+        const m = await get('/api/meta');
+        if (m && m.ok) {
+          let txt = '行情实时 · 历史数据截至 ' + (m.latest_date || '-');
+          // 本机模式（allow_refresh=true）额外显示服务 PID。
+          // 用途：改了代码后一眼确认"到底重启没有"，以及排查"是不是起了两个服务"
+          // （Windows 下 http.server 默认 allow_reuse_address=True，不会报端口占用，
+          // 会静默双绑 —— 这时页面上的 PID 就能对出来是不是旧进程还在跑）。
+          if (m.allow_refresh && m.pid) txt += ' · PID ' + m.pid;
+          metaText.value = txt;
+          allowRefresh.value = !!m.allow_refresh;
+        } else {
+          metaText.value = '历史数据日期未知';
+        }
+      } catch (e) {
+        metaText.value = '历史数据日期未知';
+      }
+    }
+
+    // 更新完成后重载当前可见的数据。后端已清缓存，所以这里能直接拿到新数据。
+    async function reloadAll() {
+      await loadMeta();
+      await loadBasis();
+      if (tab.value === 'hist') await loadHist(hist.variety, hist.years);
+      if (tab.value === 'move') await loadMove(true);
+      if (tab.value === 'iron') await loadIron(iron.years);
+    }
+
+    async function startRefresh() {
+      if (refreshing.value) return;
+      refreshing.value = true;
+      refreshMsg.value = '正在启动抓取…';
+      const r = await post('/api/refresh');
+      if (!r || !r.ok) {
+        refreshing.value = false;
+        refreshMsg.value = '启动失败：' + ((r && r.error) || '未知错误');
+        return;
+      }
+      if (r.already) refreshMsg.value = '已有一次更新在进行中，等它跑完…';
+      pollRefresh();
+    }
+
+    function pollRefresh() {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(async () => {
+        const s = await get('/api/refresh_status');
+        if (!s || !s.ok) {
+          refreshing.value = false;
+          refreshMsg.value = '查询进度失败：' + ((s && s.error) || '未知错误');
+          return;
+        }
+        if (s.running) {
+          // stage 由后端给出（股指与期货日线 / 铁矿石序列），两步都跑完才结束
+          refreshMsg.value = '正在更新' + (s.stage ? ' · ' + s.stage : '') + '…' +
+            (s.elapsed ? ' 已用 ' + Math.round(s.elapsed) + ' 秒' : '');
+          pollRefresh();
+          return;
+        }
+        refreshing.value = false;
+        const n = (s.new_rows === null || s.new_rows === undefined) ? '?' : s.new_rows;
+        if (s.error) {
+          // 注意区分：铁矿石那一步失败时，股指其实已经更新成功了。
+          // 所以照样 reloadAll()，否则用户看到的还是旧股指数据。
+          refreshMsg.value = '更新未完全成功：' + s.error;
+          await reloadAll();
+          setTimeout(() => { refreshMsg.value = ''; }, 12000);
+          return;
+        }
+        refreshMsg.value = '更新完成，新增 ' + n + ' 行，正在刷新页面…';
+        await reloadAll();
+        refreshMsg.value = '更新完成，新增 ' + n + ' 行（含铁矿石）· ' +
+          new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        // 8 秒后收起提示，把那一行还给「数据快照时间」
+        setTimeout(() => { refreshMsg.value = ''; }, 8000);
+      }, 1500);
+    }
+
+    // 支持 ?tab=hist&metric=basis 直达，便于分享/调试
+    const _initMetric = new URLSearchParams(location.search).get('metric');
+
+    // 基差看板（四品种罗列）
+    const groups = ref([]);
+    const basisTime = ref('');
+    const isTrading = ref(false);
+    // 首屏拉取失败时的提示文案（空字符串 = 正常）。有这个才能避免"永远加载中"。
+    const fetchErr = ref('');
+    let lastFetch = Date.now();
+    // 历史
+    const hist = reactive({ variety:'IC', years:1,
+      metric: (['annual','basis','spot'].includes(_initMetric) ? _initMetric : 'annual'),
+      series:[], stats:null, metrics:null });
+    const histLive = ref(false);
+    const histTrading = ref(false);
+    const histTime = ref('');
+    // 移仓
+    const moveGroups = ref([]);
+    const moveTime = ref('');
+    const moveLive = ref(false);
+    const moveTrading = ref(false);
+    const expanded = ref('');
+    // 移仓助手：当前选中的品种（IC/IM/IF/IH 四个 TAB 切换）
+    const moveVariety = ref('IC');
+    // 当前要渲染的那一组（只渲染选中的品种，避免一页太长）
+    const moveCur = Vue.computed(() => {
+      const g = moveGroups.value.find(x => x.variety === moveVariety.value);
+      return g || (moveGroups.value.length ? moveGroups.value[0] : null);
+    });
+    // 移仓助手当前品种的价格单位（点 / 元/吨）—— 表头与卡片统一按它显示，
+    // 避免铁矿石（元/吨）被套上股指的「点」。
+    const moveUnit = Vue.computed(() => {
+      const g = moveCur.value;
+      if (!g) return '点';
+      const v = moveVarieties.find(x => x.code === g.variety);
+      return (v && v.unit) || '点';
+    });
+    function setMoveVariety(code) {
+      moveVariety.value = code;
+      expanded.value = '';   // 切换品种时收起已展开的详情，避免串台
+    }
+    // 当前品种中「历史分位最高」的合约对 —— 分位越高说明贴水越厚、移仓越划算
+    const bestPair = Vue.computed(() => {
+      const g = moveCur.value;
+      if (!g || !g.rows || !g.rows.length) return null;
+      let best = null;
+      for (const r of g.rows) {
+        if (r.percentile == null) continue;
+        if (!best || r.percentile > best.percentile) best = r;
+      }
+      return best;
+    });
+    // 点汇总表某一行：展开对应卡片详情，并滚动到该卡片
+    async function onRowClick(p) {
+      if (expanded.value === p.near + p.far) { expanded.value = ''; return; }
+      await togglePair(moveCur.value ? moveCur.value.variety : moveVariety.value, p);
+      await nextTick();
+      const el = document.querySelector('.pcard[data-key="' + (p.near + p.far) + '"]');
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    // ---- 铁矿石图表（现货 / 最近合约 / 主力合约 / 基差率 / 年度对比）----
+    // 数据由 /api/ironore 提供，源头是 scripts/build_ironore_series.py 反推出来的序列。
+    const ironRanges = [{v:1,n:'近1年'},{v:3,n:'近3年'},{v:0,n:'全部'}];
+    const iron = reactive({ years:3, series:[], annual:{}, meta:{}, loading:false, err:'' });
+    const ironPriceCanvas = ref(null);
+    const ironBasisCanvas = ref(null);
+    const ironAnnualCanvas = ref(null);
+    const thisYear = new Date().getFullYear();
+    const ironLast = Vue.computed(() => iron.series.length ? iron.series[iron.series.length-1] : null);
+    const ironSpan = Vue.computed(() => {
+      const s = iron.series;
+      return s.length ? s[0].date + ' ~ ' + s[s.length-1].date : '';
+    });
+    const annualSpan = Vue.computed(() => {
+      const ys = Object.keys(iron.annual || {}).sort();
+      return ys.length ? ys[0] + '–' + ys[ys.length-1] : '';
+    });
+    // 序列的生成时间（"2026-10-04 18:32:45" → "10-04 18:32"），点「更新数据」后会变
+    const ironBuilt = Vue.computed(() => {
+      const b = (iron.meta && iron.meta.built_at) || '';
+      return b.length >= 16 ? b.slice(5, 16) : b;
+    });
+
+    async function loadIron(years) {
+      iron.years = years;
+      iron.loading = true; iron.err = '';
+      const d = await get('/api/ironore?years=' + years);
+      iron.loading = false;
+      if (!d || !d.ok) { iron.err = (d && d.error) || '铁矿石数据加载失败'; return; }
+      iron.series = d.series || [];
+      iron.annual = d.annual || {};
+      iron.meta = d.meta || {};
+      await nextTick();
+      drawIron();
+    }
+
+    function drawIron() {
+      const s = iron.series;
+      if (!s.length) return;
+      // 跨度 > 400 天时 MM-DD 会跨年重复 → 改用 YY-MM（如 18-05）
+      const spanDays = (Date.parse(s[s.length - 1].date) - Date.parse(s[0].date)) / 86400000;
+      const labels = s.map(r => spanDays > 400 ? r.date.slice(2, 7) : r.date.slice(5));
+      drawMulti(ironPriceCanvas.value, [
+        { points: s.map(r => r.spot),       color: '#0f766e', width: 1.6 },
+        { points: s.map(r => r.near_close), color: '#f59e0b', width: 1.1 },
+        { points: s.map(r => r.main_close), color: '#2563eb', width: 1.4 },
+      ], { labels, dp: 0, markLast: true });
+      drawMulti(ironBasisCanvas.value, [
+        { points: s.map(r => r.basis_rate), color: '#7c3aed', width: 1.5 },
+      ], { labels, pct: true, dp: 1, markLast: true });
+      drawIronAnnual();
+    }
+
+    function drawIronAnnual() {
+      const ann = iron.annual || {};
+      const ys = Object.keys(ann).sort();
+      if (!ys.length) return;
+      const series = ys.map(y => {
+        const cur = Number(y) === thisYear;
+        return { points: ann[y], color: cur ? '#ef4444' : 'rgba(100,116,139,.45)', width: cur ? 1.8 : 0.9 };
+      });
+      // 横轴按自然日铺 → 用每月 1 日的索引当刻度
+      const md = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+      const xticks = md.map((d, i) => ({ i: d, label: (i + 1) + '月' }));
+      drawMulti(ironAnnualCanvas.value, series, { xticks, pct: true, dp: 0 });
+    }
+
+    // 保证金
+    const mg = reactive({ variety:'IC', point:6000, capital:50, ratio:12, lots:1,
+                          pointEdited:false, result:null });
+    // 切换保证金品种时，重新用该品种的实时点位预填（尊重用户手改过的值则不清空）
+    Vue.watch(() => mg.variety, () => {
+      mg.pointEdited = false;
+      const g = groups.value.find(x => x.variety === mg.variety);
+      const px = g && g.spot && g.spot.price;
+      if (px) mg.point = Math.round(px * 10) / 10;
+      mg.result = null;
+    });
+
+    const metricName = Vue.computed(() => ({annual:'年化收益率', basis:'基差', spot:'指数收盘价'})[hist.metric]);
+    // 当前指标对应的「指标名 + 单位」
+    const metricLabel = Vue.computed(() => ({
+      annual: '当前年化', basis: '当前基差', spot: '当前点位'
+    })[hist.metric]);
+    const metricUnit = Vue.computed(() => hist.metric === 'annual' ? '%' : '');
+    // 当前指标的统计值（切换指标时本地取用，无需重新请求）
+    const cur = Vue.computed(() => {
+      const m = hist.metrics && hist.metrics[hist.metric];
+      return m || null;
+    });
+    // 切换指标：只换显示，不重新请求
+    function setMetric(mk) {
+      hist.metric = mk;
+      nextTick().then(() => drawHist());
+    }
+
+    async function loadBasis() {
+      // 一次拿全四品种（原先是 4 个并发请求，任一卡住整个 Promise.all 就挂起，
+      // 线上表现就是"数据加载中"永远不消失。详见文件开头 get() 的注释）。
+      const d = await getRetry('/api/realtime_all');
+      if (d.ok && d.varieties) {
+        const out = [];
+        varieties.forEach(v => {
+          const vd = d.varieties[v.code];
+          if (!vd || !vd.ok) return;
+          out.push({
+            variety: v.code, name: vd.name,
+            spot: vd.spot || {}, rows: vd.rows || [],
+            pctile: vd.spot_percentile,
+          });
+        });
+        groups.value = out;
+        basisTime.value = (d.server_time || '').slice(11, 16);
+        isTrading.value = !!d.is_trading;
+        fetchErr.value = '';
+        // 保证金页：首次拿到实时行情时，用点位预填（用户手改过则不覆盖）
+        if (!mg.pointEdited && !mg.result) {
+          const g0 = out.find(x => x.variety === mg.variety) || out[0];
+          const px = g0 && g0.spot && g0.spot.price;
+          if (px) mg.point = Math.round(px * 10) / 10;
+        }
+      } else {
+        // 失败了也要给用户一个交代，不能无限"加载中"。
+        // 把原始错误一起显示出来——线上排查时，光说"失败了"没法定位，
+        // 必须知道是 timeout 还是 HTTP 5xx 还是 JSON 解析炸了。
+        const raw = (d && d.error) ? d.error : 'unknown';
+        fetchErr.value = (raw === 'timeout')
+          ? '实时行情获取超时（已重试，仍失败）'
+          : '实时行情获取失败：' + raw;
+      }
+      lastFetch = Date.now();
+    }
+
+    // 首屏失败后的手动重试（清掉错误态、重新加载）
+    async function retryBasis() {
+      fetchErr.value = '';
+      await loadBasis();
+    }
+    async function loadHist(variety, years) {
+      hist.variety = variety; hist.years = years;
+      const d = await get(`/api/history?variety=${variety}&years=${years}`);
+      if (d.ok) {
+        hist.series = d.series; hist.stats = d.stats;
+        hist.metrics = d.metrics || null;
+        histLive.value = !!d.is_live;
+        histTrading.value = !!d.is_trading;
+        if (d.server_time) histTime.value = (d.server_time || '').slice(11, 16);
+      }
+      await nextTick();
+      // 直接调用：drawLine 内部已有"尺寸为 0 就登记任务、由兜底定时器补画"的机制，
+      // 不需要再依赖 requestAnimationFrame（后者在部分环境不可靠）。
+      drawHist();
+    }
+    async function loadMove(silent) {
+      // 自动刷新时不要清空展开状态，避免打断用户看图
+      if (!silent) expanded.value = '';
+      // 记录已展开的合约对，刷新后重新拉取其序列并重绘
+      const keep = expanded.value;
+      const codes = moveVarieties.map(v => v.code);
+      const results = await Promise.all(codes.map(c => get('/api/move?variety=' + c)));
+      const out = [];
+      results.forEach((d, i) => {
+        if (!d.ok || !d.rows || !d.rows.length) return;
+        out.push({ variety: codes[i], name: moveVarieties[i].name, rows: d.rows });
+        if (d.server_time) moveTime.value = (d.server_time || '').slice(11, 16);
+        moveLive.value = !!d.is_live;
+        moveTrading.value = !!d.is_trading;
+      });
+      // 保留原展开合约对的走势序列，避免刷新后图表丢失。
+      // 只保留「合并池」序列（series_src==='merged' 或点数充足）——
+      // 早期版本曾误用"本对自身序列"（新合约只有 3~5 个点），
+      // 那种旧数据不能带过来，否则图表会一直是一条短线。
+      if (keep) {
+        for (const g of out) {
+          for (const r of g.rows) {
+            if (r.near + r.far === keep) {
+              const old = findPairRow(keep);
+              if (old && old.series && old.series.length > 20 &&
+                  (!old.seriesSrc || old.seriesSrc === 'merged')) {
+                r.series = old.series; r.mean = old.mean; r.seriesSrc = old.seriesSrc;
+              }
+            }
+          }
+        }
+      }
+      moveGroups.value = out;
+      // 重绘展开的图表
+      if (keep) {
+        await nextTick();
+        const r = findPairRow(keep);
+        if (r && r.series) drawPair(r);
+      }
+    }
+    function findPairRow(key) {
+      for (const g of moveGroups.value) {
+        for (const r of g.rows) if (r.near + r.far === key) return r;
+      }
+      return null;
+    }
+    async function togglePair(variety, p) {
+      const key = p.near + p.far;
+      if (expanded.value === key) { expanded.value = ''; return; }
+      expanded.value = key;
+      // 拉取该合约对的走势数据（合并池序列，与分位线同一套样本）。
+      // 每次都重拉：数据可能已刷新，且旧版曾缓存过"自身短序列"，需覆盖。
+      const pd = await get(`/api/pair?near=${p.near}&far=${p.far}&years=1`);
+      if (pd.ok && pd.data && pd.data.series && pd.data.series.length) {
+        p.series = pd.data.series;
+        p.mean = pd.data.mean;
+        p.seriesSrc = pd.data.series_src;
+      }
+      await nextTick();
+      // 展开区显示后绘制（drawLine 内部有尺寸兜底，不必依赖 rAF）
+      drawPair(p);
+    }
+    /**
+     * 保证金计算（含"最大可承受下跌"）。
+     *
+     * 口径说明（与参考程序对齐，东哥已确认）：
+     *   单手合约价值 = 点位 × 乘数
+     *   单手保证金   = 点位 × 乘数 × 保证金比例
+     *   占用保证金   = 单手保证金 × 手数
+     *   杠杆率       = 合约总价值 ÷ 本金
+     *
+     * 「最大可承受下跌」用**动态保证金**模型（参考程序同口径）：
+     *   跌到价 P 时：
+     *     浮动盈亏 = (开仓价 − P) × 乘数 × 手数
+     *     保证金   = P × 乘数 × 手数 × 比例   ← 保证金随指数下跌而减少
+     *     剩余     = 本金 − 浮亏 − 保证金
+     *   求"剩余恰好为 0"的 P，即为支撑点位；跌幅 = (开仓价 − P) / 开仓价。
+     *
+     * 注意：这是理论测算，真实交易所有最低保证金规则、且亏损会触发追保，
+     * 不会真的让你一直扛到该位置 —— 界面上必须写明这一点。
+     */
+    function calcMargin() {
+      const v = varieties.find(x => x.code === mg.variety);
+      if (!v) return;
+      const mult = v.mult;
+      const pt = Number(mg.point) || 0;
+      const cap = (Number(mg.capital) || 0) * 10000;
+      const ratio = (Number(mg.ratio) || 0) / 100;
+      const lots = Math.max(0, Math.floor(Number(mg.lots) || 0));
+
+      const notional = pt * mult;                 // 单手合约价值
+      const marginOne = notional * ratio;         // 单手保证金
+      const used = marginOne * lots;              // 占用保证金
+      const left = cap - used;                    // 保证金外剩余
+      const totalNotional = notional * lots;      // 持仓总合约价值
+      const leverage = cap > 0 ? totalNotional / cap : 0;
+
+      // 可开手数（按"全部本金都做保证金"的上限，供用户参考）
+      const maxLots = marginOne > 0 ? Math.floor(cap / marginOne) : 0;
+
+      // ---- 最大可承受下跌（解方程，不靠循环）----
+      // 亏损 + 保证金 = 本金
+      // (pt − P)*mult*lots + P*mult*lots*ratio = cap
+      // pt*mult*lots − P*mult*lots + P*mult*lots*ratio = cap
+      // P*mult*lots*(ratio − 1) = cap − pt*mult*lots
+      // P = (pt*mult*lots − cap) / (mult*lots*(1 − ratio))
+      let supportPt = null, maxDrop = null, dropLoss = null, dropMargin = null;
+      const denom = mult * lots * (1 - ratio);
+      if (lots > 0 && denom > 0) {
+        supportPt = (pt * mult * lots - cap) / denom;
+        if (supportPt > 0 && supportPt < pt) {
+          maxDrop = (pt - supportPt) / pt;          // 跌幅（小数）
+          dropLoss = (pt - supportPt) * mult * lots; // 该点位浮亏
+          dropMargin = supportPt * mult * lots * ratio;
+        } else {
+          supportPt = null;  // 本金连一手保证金都不够（或方向不对），不算扛跌
+        }
+      }
+
+      // ---- 详细表：基准档（每 1% 一档，封顶 30%）----
+      //
+      // 注意这里的分档规则，是踩过坑的：
+      //   1) 所有超过「扛跌临界」的档位都要丢掉 —— 跌到那个位置早就爆仓了，
+      //      列出来没有意义（例如本轮 IC/12% 的临界是 23.63%，25% / 30% 两档就没意义）。
+      //   2) 临界限不能用 "< 30" 这种固定上限去过滤。曾经写成：
+      //          pcts = [..., 30]; if (maxDrop) pcts.push(maxDrop); if (p > maxDrop) continue;
+      //      当 maxDrop > 30% 时（例如 50 万本金扛 33.71%），追加的临界档 33.71
+      //      自己就撞上 `p > maxDrop` 的过滤条件被剔掉，表格永远差最后一行。
+      //      正确做法：把基准档 + 临界限合并后**统一升序排序**，再一次性过滤，
+      //      排序后的末位必然就是临界限，绝不会被漏掉。
+      const basePcts = [1,2,3,4,5,6,7,8,9,10,12,15,20,25,30];
+      // 临界档保留原始精度（不四舍五入到 2 位），原因：
+      //   四舍五入会让「判断是否临界」出现浮点陷阱。
+      //   例：maxDrop = 0.2363...，pcts 里存 23.63，
+      //      而 maxDrop*100 = 23.630000000000003，两者用 < 1e-7 比较直接判 false，
+      //      淡红底就永远不出现（这正是"看不到扛跌临界行"的真正原因）。
+      //   保留原值 23.630000000000003 后，与 maxDrop*100 完全相等，比较稳定通过。
+      //   显示时前端 fmt(r.pct,2) 照样只显示两位小数，观感不受影响。
+      const critPct = maxDrop != null ? maxDrop * 100 : null;
+      let pcts = basePcts.slice();
+      if (critPct != null) pcts.push(critPct);
+      // 用「保留两位后是否相等」去重，避免 23.63 与 23.630000000000003 同时出现两行
+      const seen = new Set();
+      pcts = pcts.filter(x => {
+        const k = Math.round(x * 100);
+        if (seen.has(k)) return critPct != null && Math.abs(x - critPct) < 1e-7;
+        seen.add(k);
+        return true;
+      }).sort((a, b) => a - b);
+
+      const rows = [];
+      for (const pc of pcts) {
+        const p = pc / 100;
+        // 统一过滤：超过扛跌临界的一律不要。
+        if (maxDrop != null && p > maxDrop + 1e-9) continue;
+        const price = pt * (1 - p);
+        const loss = (pt - price) * mult * lots;
+        const mgAt = price * mult * lots * ratio;
+        rows.push({
+          pct: Math.round(pc * 100) / 100,   // 显示用的两位小数
+          price: Math.round(price * 10) / 10,
+          loss, margin: mgAt, left: cap - loss - mgAt,
+          // 用「两位小数是否等值」判定临界行，不用浮点差比较：
+          // Math.round(pc*100) 与 Math.round(maxDrop*10000) 都是整数，整数比较稳定。
+          isLast: maxDrop != null && Math.round(pc * 100) === Math.round(maxDrop * 10000),
+        });
+      }
+
+      mg.result = {
+        notional, marginOne, used, left, leverage, lots, maxLots,
+        totalNotional, supportPt,
+        maxDrop, dropLoss, dropMargin, rows,
+      };
+    }
+    function resetMargin() {
+      mg.point = null; mg.capital = null; mg.ratio = null; mg.lots = 1;
+      mg.pointEdited = false; mg.result = null;
+    }
+
+    function switchTab(t) {
+      tab.value = t;
+      // 同步 URL，便于分享/刷新保持当前 Tab
+      try {
+        const u = new URL(location.href);
+        if (t === 'basis') u.searchParams.delete('tab'); else u.searchParams.set('tab', t);
+        history.replaceState(null, '', u.pathname + (u.search || ''));
+      } catch (e) {}
+      // 切 Tab 后等 DOM 可见（v-show 解除 display:none）再重绘，否则 canvas 尺寸为 0 画不出图
+      nextTick().then(() => {
+        if (t === 'hist') {
+          if (!hist.series.length) loadHist(hist.variety, hist.years);
+          else drawHist();
+        }
+        if (t === 'move') {
+          if (!moveGroups.value.length) loadMove();
+          else if (expanded.value) { const r = findPairRow(expanded.value); if (r && r.series) drawPair(r); }
+        }
+        if (t === 'iron') {
+          if (!iron.series.length) loadIron(iron.years);
+          else drawIron();
+        }
+      });
+    }
+
+    // ============ 通用折线图 ============
+    // canvas 在 v-show 隐藏容器里时 clientWidth/Height 为 0，且切 Tab 时
+    // DOM 刚解除 display:none、布局未必已完成 —— 单纯"延迟一点再画"存在竞态，
+    // 实测会间歇性画出空白图。
+    //
+    // 可靠做法：登记绘制任务 + 兜底自愈定时器。
+    //   - drawLine() 只登记任务并立即尝试一次
+    //   - 定时器（200ms）扫描所有待画任务，只要 canvas 拿到非零尺寸就补画
+    //   - 画成功后清除任务，定时器无任务时开销可忽略
+    const _chartJobs = new Map();   // canvas -> { points, opts } 或 { series, opts }
+    let _chartTimer = null;
+
+    function _flushCharts() {
+      for (const [cv, job] of _chartJobs) {
+        if (!cv.isConnected) { _chartJobs.delete(cv); continue; }
+        if (cv.clientWidth && cv.clientHeight) {
+          if (job.series) _paintMulti(cv, job.series, job.opts, cv.clientWidth, cv.clientHeight);
+          else _paint(cv, job.points, job.opts, cv.clientWidth, cv.clientHeight);
+          _chartJobs.delete(cv);
+        }
+      }
+      if (!_chartJobs.size && _chartTimer) { clearInterval(_chartTimer); _chartTimer = null; }
+    }
+
+    // 多线图：与 drawLine 共用同一套「登记任务 + 兜底自愈」机制，
+    // 只是把 points 换成 series（每条线一个 {points, color, dashed}）。
+    function drawMulti(canvas, series, opts) {
+      if (!canvas) return;
+      _chartJobs.set(canvas, { series, opts });
+      _flushCharts();
+      if (_chartJobs.size && !_chartTimer) {
+        const started = Date.now();
+        _chartTimer = setInterval(() => {
+          _flushCharts();
+          if (Date.now() - started > 5000 && _chartTimer) {
+            clearInterval(_chartTimer); _chartTimer = null;
+          }
+        }, 200);
+      }
+    }
+
+    function _paintMulti(canvas, series, opts, W, H) {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = W * dpr; canvas.height = H * dpr;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, W, H);
+
+      const padL = 48, padR = 12, padT = 12, padB = 30;
+      const cw = W - padL - padR, ch = H - padT - padB;
+      if (cw <= 10 || ch <= 10) return;
+
+      let mn = Infinity, mx = -Infinity;
+      series.forEach(s => s.points.forEach(v => {
+        if (v != null && !isNaN(v)) { if (v < mn) mn = v; if (v > mx) mx = v; }
+      }));
+      if (!isFinite(mn)) return;
+      const span = (mx - mn) || 1;
+      mn -= span * 0.08; mx += span * 0.08;
+
+      const N = Math.max.apply(null, series.map(s => s.points.length).concat([1]));
+      const X = i => padL + (N <= 1 ? 0 : (i / (N - 1)) * cw);
+      const Y = v => padT + ch - ((v - mn) / (mx - mn)) * ch;
+
+      // 网格 + y 轴刻度
+      ctx.strokeStyle = '#eef2f7'; ctx.lineWidth = 1;
+      ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+      for (let i = 0; i <= 4; i++) {
+        const y = padT + (ch / 4) * i;
+        ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + cw, y); ctx.stroke();
+        const v = mx - ((mx - mn) / 4) * i;
+        ctx.fillText(opts.pct ? v.toFixed(1) + '%' : v.toFixed(opts.dp == null ? 0 : opts.dp), padL - 5, y + 3);
+      }
+      // 零轴（基差率图用，正=贴水）
+      if (mn < 0 && mx > 0) {
+        ctx.strokeStyle = '#cbd5e1'; ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(padL, Y(0)); ctx.lineTo(padL + cw, Y(0)); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // 逐条线
+      series.forEach(s => {
+        if (!s.points.length) return;
+        ctx.strokeStyle = s.color || '#2563eb';
+        ctx.lineWidth = s.width || 1.4;
+        if (s.dashed) ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        let started = false;
+        s.points.forEach((v, i) => {
+          if (v == null || isNaN(v)) { started = false; return; }
+          const x = X(i), y = Y(v);
+          if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // 末点标记
+        if (opts.markLast && !s.dashed) {
+          for (let i = s.points.length - 1; i >= 0; i--) {
+            const v = s.points[i];
+            if (v == null || isNaN(v)) continue;
+            ctx.beginPath(); ctx.arc(X(i), Y(v), 2.6, 0, Math.PI * 2);
+            ctx.fillStyle = s.color || '#2563eb'; ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.stroke();
+            break;
+          }
+        }
+      });
+
+      // x 轴刻度：优先用 opts.xticks（[{i, label}]），否则自动均分
+      ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+      let ticks = opts.xticks;
+      if (!ticks) {
+        const labels = opts.labels || [];
+        const k = Math.min(5, N);
+        ticks = [];
+        for (let i = 0; i < k; i++) {
+          const idx = Math.round(i * (N - 1) / Math.max(1, k - 1));
+          ticks.push({ i: idx, label: labels[idx] || '' });
+        }
+      }
+      ticks.forEach(t => {
+        if (!t.label) return;
+        ctx.fillText(t.label, X(t.i), H - 11);
+      });
+    }
+
+    function drawLine(canvas, points, opts) {
+      if (!canvas) return;
+      _chartJobs.set(canvas, { points, opts });
+      // 立即尝试
+      _flushCharts();
+      // 未画成功的，交给兜底定时器（最多 5 秒）
+      if (_chartJobs.size && !_chartTimer) {
+        const started = Date.now();
+        _chartTimer = setInterval(() => {
+          _flushCharts();
+          if (Date.now() - started > 5000 && _chartTimer) {
+            clearInterval(_chartTimer); _chartTimer = null;
+          }
+        }, 200);
+      }
+    }
+
+    function _paint(canvas, points, opts, W, H) {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = W * dpr; canvas.height = H * dpr;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, W, H);
+
+      const padL = 44, padR = 10, padT = 14, padB = 34;
+      const cw = W - padL - padR, ch = H - padT - padB;
+      const vals = points.map(p => p.y).filter(v => v != null && !isNaN(v));
+      if (!vals.length) return;
+      let mn = Math.min(...vals), mx = Math.max(...vals);
+      if (opts.lines) opts.lines.forEach(L => { if (L!=null){ mn=Math.min(mn,L); mx=Math.max(mx,L);} });
+      const span = mx - mn || 1;
+      mn -= span * 0.08; mx += span * 0.08;
+      const X = i => padL + (points.length<=1?0:(i/(points.length-1))*cw);
+      const Y = v => padT + ch - ((v - mn)/(mx - mn))*ch;
+
+      // 网格
+      ctx.strokeStyle = '#eef2f7'; ctx.lineWidth = 1;
+      ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+      for (let i = 0; i <= 4; i++) {
+        const y = padT + (ch/4)*i;
+        ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL+cw, y); ctx.stroke();
+        const v = mx - ((mx-mn)/4)*i;
+        let lbl = opts.pct ? v.toFixed(1)+'%' : (opts.dp===0?v.toFixed(0):v.toFixed(0));
+        ctx.fillText(lbl, padL-5, y+3);
+      }
+      // 参考线颜色：与图例、卡片文字一一对应（绿/蓝/红，三色差异最大化）
+      if (opts.lines) {
+        const colors = ['#16a34a','#0891b2','#ef4444'];
+        opts.lines.forEach((L, i) => {
+          if (L == null) return;
+          ctx.strokeStyle = colors[i] || '#999'; ctx.setLineDash([4,3]); ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(padL, Y(L)); ctx.lineTo(padL+cw, Y(L)); ctx.stroke();
+          ctx.setLineDash([]);
+        });
+      }
+      // 折线
+      ctx.strokeStyle = opts.color || '#2563eb'; ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      let started = false;
+      points.forEach((p, i) => {
+        if (p.y == null || isNaN(p.y)) return;
+        const x = X(i), y = Y(p.y);
+        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      // 渐变填充
+      ctx.lineTo(X(points.length-1), padT+ch); ctx.lineTo(padL, padT+ch); ctx.closePath();
+      const g = ctx.createLinearGradient(0, padT, 0, padT+ch);
+      g.addColorStop(0, 'rgba(37,99,235,.16)'); g.addColorStop(1, 'rgba(37,99,235,0)');
+      ctx.fillStyle = g; ctx.fill();
+      // X轴标签
+      ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+      const n = points.length;
+      // 末点突出显示（实时点）
+      if (opts.highlightLast && n > 0) {
+        const p = points[n-1];
+        if (p.y != null && !isNaN(p.y)) {
+          const lx = X(n-1), ly = Y(p.y);
+          // 外圈光晕
+          ctx.beginPath(); ctx.arc(lx, ly, 7, 0, Math.PI*2);
+          ctx.fillStyle = 'rgba(239,68,68,.18)'; ctx.fill();
+          // 实心点
+          ctx.beginPath(); ctx.arc(lx, ly, 3.5, 0, Math.PI*2);
+          ctx.fillStyle = '#ef4444'; ctx.fill();
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+        }
+      }
+      const ticks = Math.min(5, n);
+      for (let i = 0; i < ticks; i++) {
+        const idx = Math.round(i * (n-1) / Math.max(1, ticks-1));
+        ctx.fillText(points[idx].x, X(idx), H - 12);
+      }
+    }
+
+    // 调试用：记录最近若干次 drawHist 的调用情况
+    window.__histLog = [];
+    function drawHist() {
+      const el = histCanvas.value;
+      const _dbg = { t: new Date().toLocaleTimeString(), ref: !!el, n: hist.series.length };
+      if (el) { _dbg.cw = el.clientWidth; _dbg.ch = el.clientHeight; _dbg.connected = el.isConnected; }
+      window.__histLog.push(_dbg);
+      if (window.__histLog.length > 8) window.__histLog.shift();
+      // canvas 的 ref 可能尚未绑定（切 Tab / 首次渲染的时序问题）。
+      // 不要静默 return —— 登记一个"待重绘"意图，由兜底机制完成。
+      if (!el || !hist.series.length) { scheduleHistRedraw(); return; }
+      const pts = hist.series.map(s => ({
+        x: (s.date||'').slice(2),
+        y: hist.metric==='annual' ? s.annual : (hist.metric==='basis' ? s.basis : s.spot),
+      }));
+      let lines = null;
+      // 分位参考线：三个指标都画（都用各自的 25/50/75 分位）
+      const c = cur.value;
+      if (c) lines = [c.q25, c.q50, c.q75];
+      drawLine(el, pts, { pct: hist.metric==='annual', lines,
+                          color: hist.metric==='spot'?'#0f766e':'#2563eb',
+                          highlightLast: histLive.value });
+    }
+
+    // 待重绘兜底：canvas ref 未就绪时反复重试（最多 5 秒）
+    let _histRetryTimer = null;
+    function scheduleHistRedraw() {
+      if (_histRetryTimer) return;
+      const started = Date.now();
+      _histRetryTimer = setInterval(() => {
+        const ok = histCanvas.value && histCanvas.value.clientWidth && histCanvas.value.clientHeight;
+        if (ok) {
+          clearInterval(_histRetryTimer); _histRetryTimer = null;
+          drawHist();
+        } else if (Date.now() - started > 5000) {
+          clearInterval(_histRetryTimer); _histRetryTimer = null;
+        }
+      }, 100);
+    }
+
+    function drawPair(p) {
+      const el = pairCanvases[p.near + p.far];
+      if (!el || !p.series) return;
+      const pts = p.series.map(s => ({ x: (s.date||'').slice(2), y: s.spread }));
+      // 注意：series 用的是「同类合约对合并池」（与分位线同一套样本），
+      // 不是这一对合约自身的短序列 —— 后者只有几个点，画出来是条短线。
+      drawLine(el, pts, { lines: [p.q30, p.q50, p.q75], color: '#2563eb' });
+    }
+
+    const histCanvas = ref(null);
+    const pairCanvases = {};
+    function setPairCanvas(key, el) { if (el) pairCanvases[key] = el; }
+
+    let lastMoveFetch = Date.now();
+    let lastHistFetch = Date.now();
+    onMounted(async () => {
+      // 分段渲染：meta 和 realtime 各管各的，谁先回来谁先出内容。
+      // 原来串行 await 且无兜底，任一环节卡住整页就是白屏（线上事故根因）。
+      // meta 只影响右上角那行小字，拿不到也不该挡住主内容。
+      // 它同时带回 allow_refresh —— 决定「更新数据」按钮要不要出现。
+      await loadMeta();
+      // 主内容：失败会在 loadBasis 内部写 fetchErr，页面显示重试按钮
+      await loadBasis();
+      // 若通过 URL 指定了 Tab，进入后按需加载对应数据
+      if (tab.value === 'hist') loadHist(hist.variety, hist.years);
+      if (tab.value === 'move') loadMove();
+      if (tab.value === 'iron') loadIron(iron.years);
+      // 实时自动刷新：交易时段每 5 秒，非交易时段每 60 秒
+      setInterval(() => {
+        const gap = isTrading.value ? 5000 : 60000;
+        const now = Date.now();
+        if (tab.value === 'basis' && now - lastFetch >= gap) { lastFetch = now; loadBasis(); }
+        if (tab.value === 'move' && moveGroups.value.length && now - lastMoveFetch >= gap) {
+          lastMoveFetch = now; loadMove(true);
+        }
+        if (tab.value === 'hist' && hist.series.length && now - lastHistFetch >= gap) {
+          lastHistFetch = now; loadHist(hist.variety, hist.years);
+        }
+      }, 2000);
+    });
+
+    // 让历史 canvas 可被 ref 拿到
+    watch(() => tab.value, async () => { await nextTick(); });
+
+    // ---- 临时诊断钩子：?debug=1 时把 canvas 状态写进 DOM，便于自动化核对 ----
+    if (new URLSearchParams(location.search).get('debug')) {
+      const box = document.createElement('div');
+      box.id = '__diag';
+      box.style.cssText = 'position:fixed;left:0;bottom:0;background:#fff;font-size:10px;z-index:999;padding:4px;max-width:100%;white-space:pre-wrap';
+      document.body.appendChild(box);
+      let lastDrawAt = 0;
+      window.__markDraw = () => { lastDrawAt = Date.now(); };
+      window.__forceRedraw = () => { try { drawHist(); return 'ok'; } catch (e) { return 'err:' + e.message; } };
+      setInterval(() => {
+        const cvs = [...document.querySelectorAll('canvas')];
+        const info = cvs.map((c, i) => {
+          let filled = -1;
+          try {
+            const ctx = c.getContext('2d');
+            if (c.width && c.height) {
+              const d = ctx.getImageData(0, 0, c.width, c.height).data;
+              let nz = 0;
+              for (let j = 3; j < d.length; j += 4) if (d[j] > 0) nz++;
+              filled = nz;
+            }
+          } catch (e) { filled = -2; }
+          return `#${i}[css=${c.clientWidth}x${c.clientHeight} buf=${c.width}x${c.height} px=${filled}]`;
+        }).join(' ');
+        const force = new URLSearchParams(location.search).get('force');
+        if (force && cvs.length) { window.__forceRedraw(); }
+        const range = hist.stats ? `${hist.stats.start}~${hist.stats.end}` : '无';
+        const log = (window.__histLog || []).map(x =>
+          `${x.t}(ref=${x.ref?'Y':'N'},n=${x.n},${x.cw||0}x${x.ch||0})`).join(' | ');
+        box.textContent = `TAB=${tab.value} years=${hist.years} 区间=${range} 分位=${hist.stats?hist.stats.percentile:'-'} ${info}\ndrawHist: ${log}`;
+      }, 1000);
+      // ?autoclick=hist 时，3 秒后模拟点击"历史贴水"按钮（用于自动化核对 switchTab 路径）
+      const ac = new URLSearchParams(location.search).get('autoclick');
+      if (ac) {
+        setTimeout(() => {
+          const t = [...document.querySelectorAll('.tabbar .t')].find(x => x.dataset.tab === ac);
+          if (t) t.click();
+        }, 3000);
+      }
+    }
+
+    // 窗口尺寸变化时重绘（canvas 是手动绘制的，不会自动响应）
+    let _rzTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(_rzTimer);
+      _rzTimer = setTimeout(() => {
+        if (tab.value === 'hist' && hist.series.length) drawHist();
+        if (tab.value === 'move' && expanded.value) {
+          const r = findPairRow(expanded.value);
+          if (r && r.series) drawPair(r);
+        }
+      }, 150);
+    });
+
+    return {
+      tab, varieties, ranges, metaText, groups, basisTime, isTrading, fetchErr,
+      allowRefresh, refreshing, refreshMsg, startRefresh,
+      moveGroups, moveTime, moveLive, moveTrading, moveVariety, moveCur, setMoveVariety,
+      moveVarieties, moveUnit,
+      bestPair, onRowClick,
+      histLive, histTrading, histTime,
+      hist, expanded, mg,
+      iron, ironRanges, loadIron, ironLast, ironSpan, annualSpan, ironBuilt, thisYear,
+      ironPriceCanvas, ironBasisCanvas, ironAnnualCanvas,
+      metricName, metricLabel, metricUnit, cur, setMetric,
+      loadHist, loadMove, togglePair, calcMargin, resetMargin, switchTab,
+      retryBasis,
+      fmt, histCanvas, setPairCanvas,
+    };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>

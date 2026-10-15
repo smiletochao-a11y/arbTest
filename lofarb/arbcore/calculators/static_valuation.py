@@ -1,0 +1,328 @@
+# -*- coding: utf-8 -*-
+# static_valuation.py - 静态估值核心计算引擎 (工业级 V2.2)
+
+import pandas as pd
+import logging
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+# [AI-2026-07-27] 统一估值核心 + 数据引擎（采集与计算分离）
+from .unified_valuation import basket_valuation
+from .valuation_data_engine import assemble_static_components
+
+logger = logging.getLogger(__name__)
+
+class StaticValuationCalculator:
+    def __init__(self, db_manager):
+        self.db = db_manager
+        
+    def process_fund(self, fund_config: Dict[str, Any]):
+        """
+        计算单只基金的静态估值历史并存入数据库
+        """
+        code = str(fund_config.get('code', ''))
+        name = fund_config.get('name', '')
+        if not code: return False
+        
+        logger.info(f"📊 [静态估值] 开始计算: {name} ({code})")
+        
+        # 1. 获取基础数据 (A股收盘价、净值、汇率、因子)
+        # 暂时保留部分 SQL 以保证联表查询效率，但未来应封装进 Manager
+        conn = self.db._get_conn()
+        try:
+            # [AI-2026-06-28] 改用 unified_fund_history（废弃 fund_data）
+            query = """
+                SELECT 
+                    a.date, a.price as close, a.nav, 
+                    c.usd_cny_mid as exchange_rate,
+                    b.position, b.hedge, b.calibration
+                FROM unified_fund_history a
+                LEFT JOIN fund_daily_factors b ON a.date = b.date AND a.fund_code = b.fund_code
+                LEFT JOIN exchange_rate c ON a.date = c.date
+                WHERE a.fund_code = ?
+                ORDER BY a.date DESC LIMIT 40
+            """
+            df = pd.read_sql(query, conn, params=(code,))
+            if df.empty:
+                logger.warning(f"  ⚠️ [{name}] 基础行情数据为空，跳过")
+                return False
+
+            # [AI-2026-08-16] 篮子标的集以 fund_basket_weights 表为权威（根治 160216 等误差+30% bug）
+            # 旧代码用 yaml valuation_portfolio 的标的去 fund_basket_weights 取权重，当 db 篮子随 woody
+            # 更新（如 160216 的 XLE→XOP）而 yaml 滞后时，yaml 标的(XLE)在 db 取不到权重→fallback 旧权重
+            # → 权重和爆到 138% → static_val 高估~39%。现改为：db 有标的则用 db（含各日期权重随 date 对齐），
+            # db 无则兜底 yaml portfolio（兼容单ETF/指数基金）。
+            db_symbols = [r[0] for r in conn.execute(
+                "SELECT DISTINCT underlying_symbol FROM fund_basket_weights WHERE fund_code=?", (code,)
+            ).fetchall()]
+            if db_symbols:
+                portfolio = [{'symbol': s} for s in db_symbols]
+            else:
+                portfolio = fund_config.get('valuation_portfolio', []) or fund_config.get('hedging_portfolio', [])
+            primary_sym = self._identify_primary_symbol(fund_config)
+
+            # 批量获取持仓价格
+            for item in portfolio:
+                sym = item.get('symbol', '').replace('^', '')
+                # 处理区域后缀
+                if any(suffix in sym for suffix in ['-JP', '-EU', '-HK']):
+                    sym = f"^{sym}"
+                
+                etf_df = pd.read_sql(f'SELECT date, COALESCE(NULLIF(netvalue, 0), price) as "{sym}" FROM usa_etf_daily_prices WHERE symbol = ?', conn, params=(sym,))
+                df = pd.merge(df, etf_df, on='date', how='left')
+                
+                # 获取权重
+                weight_df = pd.read_sql('SELECT date, weight FROM fund_basket_weights WHERE fund_code = ? AND underlying_symbol = ?', conn, params=(code, sym))
+                weight_df.rename(columns={'weight': f'{sym}_weight'}, inplace=True)
+                df = pd.merge(df, weight_df, on='date', how='left')
+
+            # 2. 执行计算
+            df = self._calculate_history(df, portfolio, primary_sym, fund_config)
+            
+            # 3. 保存结果
+            self._save_results(code, df)
+            return True
+            
+        except Exception as e:
+            logger.error(f"  ❌ [{name}] 计算异常: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def _identify_primary_symbol(self, fund_config: Dict) -> Optional[str]:
+        """识别主对冲锚点"""
+        portfolio = fund_config.get('valuation_portfolio', []) or fund_config.get('hedging_portfolio', [])
+        if not portfolio: return None
+        
+        first_sym = portfolio[0].get('symbol', '').replace('^', '').split('-')[0]
+        # 优先匹配已知的大宗锚点
+        base_syms = ['GLD', 'USO', 'XOP', 'XBI', 'SLV', 'SPY', 'QQQ']
+        for bs in base_syms:
+            if bs in first_sym: return bs
+        return first_sym
+
+    def _calculate_history(self, df: pd.DataFrame, portfolio: List[Dict], primary_sym: str, fund_config: Dict) -> pd.DataFrame:
+        """核心历史推演循环"""
+        df = df.sort_values('date', ascending=False).reset_index(drop=True)
+        df['static_val'] = None
+        df['val_error'] = None
+        
+        # [AI-2026-08-16] 去掉 bfill 向前填充：合并全部历史篮子标的后，bfill 会把
+        # 旧日期(已清仓标的,如 160216 的 XLE)的权重沿降序 df 向前填到新日期，
+        # 污染当前篮子(权重和爆到 140%+ → static_val 高估~40%)。改为该日期 db 无
+        # 权重则该日不持有(=0)，符合 SUPREME 铁律「缺失不伪装」。woody 每日更新篮子，
+        # 正常每个交易日都有权重；缺失即真实不持有，不应跨期借用旧权重。
+        for item in portfolio:
+            sym = item.get('symbol', '').replace('^', '')
+            # 处理区域后缀 — 和 merge 时保持一致
+            if any(suffix in sym for suffix in ['-JP', '-EU', '-HK']):
+                sym = f"^{sym}"
+            w_col = f"{sym}_weight"
+            if w_col in df.columns:
+                df[w_col] = df[w_col].fillna(0)
+        
+        # 遍历日期进行推演
+        for i in range(len(df)):
+            row = df.iloc[i]
+            # 寻找 T-1 基准日 (最多回溯 15 个自然行以跨过周末/假期)
+            base_row = None
+            for j in range(i + 1, min(i + 15, len(df))):
+                candidate = df.iloc[j]
+                if pd.notna(candidate['nav']) and candidate['nav'] > 0 and pd.notna(candidate['exchange_rate']):
+                    base_row = candidate
+                    break
+            
+            if base_row is None: continue
+            
+            # [AI-2026-06-28] 检查基准日跨度，超过 5 个自然日说明中间有长假（端午/春节），跳过计算
+            from datetime import datetime as _dt
+            try:
+                base_dt = _dt.strptime(str(base_row['date']), '%Y-%m-%d')
+                curr_dt = _dt.strptime(str(row['date']), '%Y-%m-%d')
+                gap_days = (curr_dt - base_dt).days
+                if gap_days > 5:
+                    logger.info(f"  ⏭️ [{code}] {row['date']} 距基准日 {base_row['date']} 跨越 {gap_days} 天（长假），跳过静态估值")
+                    continue
+            except:
+                pass
+            
+            # 计算逻辑
+            val = self._deduce_valuation(row, base_row, portfolio, primary_sym, fund_config)
+            if val:
+                df.at[i, 'static_val'] = round(val, 4)
+                if pd.notna(row['nav']) and row['nav'] > 0:
+                    df.at[i, 'val_error'] = (val - row['nav']) / row['nav']
+                    
+        return df
+
+    def _deduce_valuation(self, row, base_row, portfolio, primary_sym, fund_config) -> Optional[float]:
+        """单点估值推演"""
+        b_nav = base_row['nav']
+        b_fx = base_row['exchange_rate']
+        c_fx = row['exchange_rate']
+        position = base_row['position']
+        # [AI-2026-08-04 SUPREME 铁律] 禁止用 equity_ratio 备用源 position。
+        # 此变量实际未参与估值（估值走 assembled['position']），但按铁律仍不兜底。
+        if pd.isna(position):
+            position = None
+        
+        # [AI-2026-07-27] 统一估值核心：数据引擎装配 + 单一篮子公式
+        # 静态估值可消费 hedge（如 162411 的 XOP 魔法公式），其余走矩阵/指数路径。
+        # hedge 是否可用由 valuation_method 决定（index/亚洲/国内LOF 强制 None，防误走魔法）。
+        # 标的类型（ETF/指数/期货）只决定喂进来的 components，不改变公式本身。
+        # [AI-2026-07-27] 补传 category：valuation_method 为空串的基金（如 513000 QDII日本）
+        # 由 yaml valuation_routing.category_fallback 备用源路由，防止误走魔法公式
+        assembled = assemble_static_components(
+            row, base_row, portfolio,
+            fund_config.get('related_index', ''),
+            fund_config.get('valuation_method', ''),
+            fund_config.get('category', ''),
+        )
+        if assembled['ok']:
+            val = basket_valuation(
+                assembled['base_nav'], assembled['position'], assembled['components'],
+                assembled['fx_base'], assembled['fx_now'], hedge=assembled.get('hedge'),
+            )
+            if val is not None:
+                return val
+        return None
+
+    def _save_results(self, fund_code: str, df: pd.DataFrame):
+        """保存结果到数据库"""
+        conn = self.db._get_conn()
+        cursor = conn.cursor()
+        try:
+            for _, row in df.iterrows():
+                if pd.notna(row['static_val']):
+                    # [AI-2026-06-28] 直接写入 unified_fund_history（废弃 fund_data）
+                    # [AI-2026-10-09] 打 writer 标识，供事后追查"这行 static_val 是谁写的"
+                    cursor.execute("""
+                        INSERT INTO unified_fund_history (date, fund_code, static_val, valuation_error, calibration, writer)
+                        VALUES (?, ?, ?, ?, ?, 'lofarb:static_valuation')
+                        ON CONFLICT(date, fund_code) DO UPDATE SET 
+                            static_val = excluded.static_val,
+                            valuation_error = excluded.valuation_error,
+                            writer = 'lofarb:static_valuation'
+                    """, (row['date'], fund_code, row['static_val'], row['val_error'], row.get('calibration')))
+            conn.commit()
+        finally:
+            conn.close()
+
+    # [AI-2026-08-05] 新增只读方法：供聚合层(arbcore/analysis/static_analysis.py) Debug 调用。
+    # 与 process_fund 共用同一套数据装配(assemble_static_components)+估值核心(basket_valuation)，
+    # 但只读、不写库，返回单日静态估值 + 溢价（溢价按 AGENTS.md TOP2 铁律分类分支）。
+    def analyze_latest(self, fund_config: Dict[str, Any], date: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """只读计算单日静态估值 + 溢价，不写库。
+
+        Args:
+            fund_config: 基金配置 dict（来自 lof_config.yaml）
+            date:       指定估值日 'YYYY-MM-DD'；缺省取最新一日（有净值）
+
+        Returns:
+            {'code','name','category','date','nav','close','static_val',
+             'premium'(小数,按分类分支)} 或 None（数据缺失/无法估值）
+        """
+        code = str(fund_config.get('code', ''))
+        if not code:
+            return None
+
+        conn = self.db._get_conn()
+        try:
+            query = """
+                SELECT
+                    a.date, a.price as close, a.nav, a.static_val,
+                    c.usd_cny_mid as exchange_rate,
+                    b.position, b.hedge, b.calibration
+                FROM unified_fund_history a
+                LEFT JOIN fund_daily_factors b ON a.date = b.date AND a.fund_code = b.fund_code
+                LEFT JOIN exchange_rate c ON a.date = c.date
+                WHERE a.fund_code = ?
+                ORDER BY a.date DESC LIMIT 40
+            """
+            df = pd.read_sql(query, conn, params=(code,))
+            if df.empty:
+                logger.warning(f"  ⚠️ [{code}] 无行情数据，无法静态估值")
+                return None
+
+            # [AI-2026-08-16] 与 process_fund 同逻辑：篮子标的集以 fund_basket_weights 表为权威
+            db_symbols = [r[0] for r in conn.execute(
+                "SELECT DISTINCT underlying_symbol FROM fund_basket_weights WHERE fund_code=?", (code,)
+            ).fetchall()]
+            if db_symbols:
+                portfolio = [{'symbol': s} for s in db_symbols]
+            else:
+                portfolio = fund_config.get('valuation_portfolio', []) or fund_config.get('hedging_portfolio', [])
+            primary_sym = self._identify_primary_symbol(fund_config)
+
+            # 批量关联持仓 ETF 价格（与 process_fund 同逻辑）
+            for item in portfolio:
+                sym = item.get('symbol', '').replace('^', '')
+                if any(suffix in sym for suffix in ['-JP', '-EU', '-HK']):
+                    sym = f"^{sym}"
+                etf_df = pd.read_sql(
+                    f'SELECT date, COALESCE(NULLIF(netvalue, 0), price) as "{sym}" '
+                    f'FROM usa_etf_daily_prices WHERE symbol = ?',
+                    conn, params=(sym,))
+                df = pd.merge(df, etf_df, on='date', how='left')
+
+            df = df.sort_values('date', ascending=False).reset_index(drop=True)
+
+            # 定位估值日行
+            target_idx = None
+            if date:
+                for i in range(len(df)):
+                    if str(df.iloc[i]['date']) == str(date):
+                        target_idx = i
+                        break
+                if target_idx is None:
+                    logger.warning(f"  ⚠️ [{code}] 指定日 {date} 无数据")
+                    return None
+            else:
+                for i in range(len(df)):
+                    if pd.notna(df.iloc[i]['nav']) and df.iloc[i]['nav'] > 0:
+                        target_idx = i
+                        break
+                if target_idx is None:
+                    return None
+
+            row = df.iloc[target_idx]
+            if pd.isna(row['nav']) or row['nav'] <= 0:
+                return None
+
+            # 找 T-1 基准日（最多回溯 15 行跨周末/假期）
+            base_row = None
+            for j in range(target_idx + 1, min(target_idx + 15, len(df))):
+                cand = df.iloc[j]
+                if pd.notna(cand['nav']) and cand['nav'] > 0 and pd.notna(cand['exchange_rate']):
+                    base_row = cand
+                    break
+            if base_row is None:
+                logger.warning(f"  ⚠️ [{code}] {row['date']} 无有效 T-1 基准日，跳过")
+                return None
+
+            val = self._deduce_valuation(row, base_row, portfolio, primary_sym, fund_config)
+            if val is None:
+                return None
+
+            # 溢价按分类分支（AGENTS.md TOP2 铁律）
+            cat = fund_config.get('category', '')
+            if cat in ('QDII欧美', '黄金原油'):
+                prem_nav = base_row['nav']      # T-1 净值
+            else:
+                prem_nav = row['nav']           # 同日 T 净值
+            premium = (row['close'] / prem_nav - 1) if (pd.notna(row['close']) and prem_nav and prem_nav > 0) else None
+
+            return {
+                'code': code,
+                'name': fund_config.get('name', ''),
+                'category': cat,
+                'date': row['date'],
+                'nav': round(float(row['nav']), 4),
+                'close': round(float(row['close']), 4) if pd.notna(row['close']) else None,
+                'static_val': round(float(val), 4),
+                'premium': round(float(premium), 4) if premium is not None else None,
+            }
+        except Exception as e:
+            logger.error(f"  ❌ [{code}] analyze_latest 异常: {e}")
+            return None
+        finally:
+            conn.close()

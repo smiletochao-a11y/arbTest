@@ -1,0 +1,106 @@
+# ============================================================
+# arbTest 源码仓库（项目根 = src/，物理隔离）
+# D:\Study\arbTest 下所有 "." 开头的 AI/工具目录
+# (.workbuddy/.opencode/.codegraph/.omo/.open-mem 等) 天然在仓库外，不上传。
+# 本文件只管 src/ 内部的敏感/非源码内容。
+# ============================================================
+
+# --- 实盘数据库（不传）---
+# 活库/分享库已整体移出仓库根到 D:\Study\arbTest\database\（物理隔离，src 内零 database）
+# 此处 *.db 等规则仅作纵深防御：万一 src 内误落任何 db 也绝不传。
+*.db
+# SQLite 运行时 sidecar（实盘库孪生体，绝不传）
+*.db-shm
+*.db-wal
+
+# --- 数据库 / 仓库 备份（不传）---
+**/*.bak*
+**/*.bundle
+
+# --- 密钥 / 私密配置 ---
+account_private.py
+# IB Flex / 各类只读凭据：真实 .env 应放仓库外项目根(D:\Study\arbTest\.env)，此条防误放 src/ 内被提交
+.env
+**/.env
+arbcore/scripts/
+# --- 个人脚本目录（不上传；2026-10-10 东哥定）---
+#   例外：ArbDashboard/frontend/scripts/wait-backend.mjs 是 npm run dev 的构建依赖，
+#   仍保留跟踪（前端 dev 流程需要）。如需彻底排除，见 _githooks/GITHUB_GOVERNANCE.md §9。
+/scripts/
+ArbDashboard/backend/scripts/
+**/private/
+**/Lazy*
+**/*lazy*
+
+# --- 交易策略 / 私密模块 ---
+**/auto_trade/
+# 根目录项目指引（含内部口径，不传）
+agents.md
+# --- 文档 / Markdown（一律不上传；2026-10-10 东哥定）---
+#   任何 .md / agents.md / docs/ 都不进 GitHub（公开仓只放源码）。
+**/*.md
+**/*.markdown
+**/AGENTS.md
+**/agents.md
+**/docs/
+# 本地代理/VPN 启动脚本（仅本机用，不传）
+Proxy.bat
+# 交易信号检测 / 前端下单逻辑（不传）
+**/signal_detector.py
+**/useOrderLogic.js
+# 🔴 [AI-2026-10-09 东哥拍板] arbcore/traders/ 彻底清 —— 交易内核已剥离至 LOFTrader。
+#   这三个文件不保密，但职责已归 LOFTrader，LOFarb 侧不再跟踪，防回流。
+arbcore/traders/
+# 交易/账本/策略模块（开源治理 014：10-08 移出公开跟踪；磁盘保留、本地照常运行）
+ArbDashboard/backend/services/ledger_service.py
+ArbDashboard/frontend/src/api/ledgerApi.ts
+ArbDashboard/frontend/src/components/ManualTradeSection.vue
+ArbDashboard/frontend/src/components/TradeWorkbench.vue
+ArbDashboard/frontend/src/views/AutoTrade.vue
+ArbDashboard/frontend/src/views/Ledger.vue
+
+# --- 日志（不传）---
+*.log
+
+# --- 续传 session / 内部运行态（不传）---
+.omo/
+
+# --- 项目内数据目录（交易记录/同步/验证/woodyAPI，含账户与内部数据，不传）---
+ArbDashboard/data/
+
+# --- 临时 / 运行时 json（不传）---
+**/_ps_tmp.json
+**/rt_cache.json
+**/rt_freeze.json
+
+# --- 运行时锁文件（不传）---
+*.lock
+
+# --- AI 临时调试脚本（不传）---
+_ai_backup/
+scratch/
+# 临时指令文件（文件名含"给 AI 的修改指令"，误提交；10-08 移出跟踪）
+arbcore/fetchers/20260508*
+
+# --- 构建产物 & 依赖 ---
+__pycache__/
+*.pyc
+node_modules/
+.venv/
+venv/
+
+# --- 项目非源码目录（含内部文档，不传）---
+deploy/
+docs/
+docs_unfinished/
+logs/
+
+# --- 前端构建缓存 ---
+dist/
+.vite/
+
+# --- [AI-2026-10-10] 公开仓移除：rule_engine 拆分后的残留副本 ---
+#   交易内核已整体归 LOFTrader(private 仓)；本仓 main.py 中 rule_engine = None，
+#   该文件为死代码，但会公开暴露策略阈值 / 对冲标的映射，故取消跟踪、不再入库。
+#   唯一权威实现：LOFTrader/backend/services/rule_engine.py
+ArbDashboard/backend/services/rule_engine.py

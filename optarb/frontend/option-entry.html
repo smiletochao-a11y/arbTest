@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>入场判断 · 卖沽建仓时机</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ink:#111827; --mut:#6b7280;
+    --red:#dc2626; --green:#16a34a; --blue:#2563eb; --amber:#d97706;
+    --shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;}
+  .wrap{max-width:1180px;margin:0 auto;padding:20px 16px 60px;}
+  h1{font-size:20px;margin:0 0 4px;font-weight:650;}
+  .sub{color:var(--mut);font-size:13px;margin-bottom:18px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+        padding:16px 18px;margin-bottom:14px;box-shadow:var(--shadow);}
+  .nav{display:flex;gap:6px;margin:0 0 14px;flex-wrap:wrap;}
+  .nav a{font-size:13px;text-decoration:none;color:var(--mut);padding:6px 13px;
+         border:1px solid var(--line);border-radius:8px;background:#fff;}
+  .nav a:hover{background:#f9fafb;color:var(--ink);}
+  .nav a.on{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:500;}
+  .bar{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;}
+  select,input{font:inherit;padding:7px 9px;border:1px solid var(--line);
+        border-radius:7px;background:#fff;color:var(--ink);outline:none;}
+  input[type=number]{width:110px;}
+  button{font:inherit;padding:7px 14px;border:1px solid var(--line);border-radius:7px;
+         background:#fff;color:var(--ink);cursor:pointer;}
+  button:hover{background:#f9fafb;}
+  .lb{font-size:12px;color:var(--mut);}
+  /* ── 一句话结论 ─────────────────────────────── */
+  .verdict{border:1px solid #fde68a;background:#fffbeb;border-radius:10px;
+           padding:14px 18px;margin-bottom:14px;}
+  .verdict .t{font-size:12px;color:var(--amber);letter-spacing:.04em;margin-bottom:6px;}
+  .verdict .head{font-size:17px;font-weight:650;line-height:1.5;margin-bottom:6px;}
+  .verdict .act{font-size:13.5px;line-height:1.7;}
+  .verdict.stop{border-color:#fecaca;background:#fef2f2;}
+  .verdict.stop .t{color:var(--red);}
+  .verdict.go{border-color:#bbf7d0;background:#f0fdf4;}
+  .verdict.go .t{color:var(--green);}
+  /* ── 六格 ──────────────────────────────────── */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;}
+  .box{background:#f9fafb;border:1px solid var(--line);border-radius:9px;padding:13px 15px;}
+  .box .h{font-size:12px;color:var(--mut);margin-bottom:9px;display:flex;
+          align-items:center;gap:6px;flex-wrap:wrap;}
+  .box .v{font-size:22px;font-weight:650;letter-spacing:-.3px;}
+  .box .n{font-size:12px;color:var(--mut);margin-top:7px;line-height:1.7;}
+  .box .n b{color:var(--ink);font-weight:600;}
+  .kv{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px;}
+  .kv div{min-width:52px;}
+  .kv .k{font-size:11px;color:var(--mut);}
+  .kv .x{font-size:19px;font-weight:650;}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:20px;
+       background:#eef2ff;color:#4338ca;}
+  .tag.red{background:#fee2e2;color:#991b1b;}
+  .tag.green{background:#dcfce7;color:#166534;}
+  .tag.amber{background:#fef3c7;color:#92400e;}
+  .tag.gray{background:#f3f4f6;color:#4b5563;}
+  /* ── 卡片说明浮层：悬停才浮出，不占版面 ──────── */
+  .tcard{position:relative;}
+  .tcard .qi{display:inline-flex;align-items:center;justify-content:center;
+       width:15px;height:15px;border-radius:50%;border:1px solid var(--line);
+       background:#fff;color:var(--mut);font-size:10px;font-weight:700;
+       line-height:1;cursor:help;user-select:none;flex:0 0 auto;}
+  .tcard .qi:hover{border-color:var(--blue);color:var(--blue);}
+  .tcard .pop{display:none;position:absolute;left:0;right:auto;top:100%;margin-top:10px;
+       width:min(400px,calc(100vw - 40px));max-height:70vh;overflow:auto;
+       z-index:40;background:#fff;border:1px solid var(--line);border-radius:9px;
+       padding:12px 14px;box-shadow:0 10px 28px rgba(0,0,0,.14);
+       font-size:12px;color:var(--mut);line-height:1.7;
+       white-space:pre-line;text-align:left;}
+  /* 卡片在右半屏时贴右对齐，防止浮层顶出视口 */
+  .tcard .pop.r{left:auto;right:0;}
+  /* 桥接层：卡片下沿到浮层之间的 10px 空隙也要算作可悬停区，否则鼠标下移会闪断 */
+  .tcard .pop::before{content:'';position:absolute;left:0;right:0;top:-12px;height:12px;}
+  .tcard .pop::after{content:'';position:absolute;left:22px;top:-6px;width:10px;height:10px;
+       background:#fff;border-left:1px solid var(--line);border-top:1px solid var(--line);
+       transform:rotate(45deg);}
+  .tcard .pop.r::after{left:auto;right:22px;}
+  .tcard .pop b{color:var(--ink);font-weight:600;}
+  .tcard.pin .pop{display:block;}
+  /* ★ 只在真正支持 hover 的设备上挂 :hover —— 触屏上「点一下」会让元素卡在
+     :hover 状态，浮层会关不掉、并且盖住下一张卡片的「?」（2026-10-01 实测踩到） */
+  @media (hover: hover){
+    .tcard:hover .pop{display:block;}
+  }
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--line);}
+  th{color:var(--mut);font-weight:500;font-size:12px;}
+  th:first-child,td:first-child{text-align:left;}
+  .loading{color:var(--mut);font-size:13px;}
+  .err{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;
+       padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px;}
+  .foot{font-size:12px;color:#9aa1ad;line-height:1.8;margin-top:14px;}
+</style>
+</head>
+<body>
+<div id="app" class="wrap">
+<!-- ⚠️ 关闭浮层的监听必须挂在**这一层内层 div** 上：
+     Vue 的 in-DOM 模板取的是 #app 的 innerHTML，写在 #app 自身上的 @click 不参与编译，
+     点了没反应（2026-10-01 实测踩到）。挂在内层才能覆盖整页。 -->
+<div @click="closeAll">
+
+  <div class="nav">
+    <a :href="hrefOf('option')">持仓体检</a>
+    <a :href="hrefOf('option-daily')">卖沽移仓价差（日报）</a>
+    <a :href="hrefOf('option-risk')">移仓决策台</a>
+    <a class="on" :href="hrefOf('option-entry')">入场判断</a>
+  </div>
+
+  <h1>入场判断 · 卖沽建仓时机</h1>
+  <div class="sub">
+    IV 来自上交所官方风险指标，指数来自新浪日线 · <b>不预测行情、不自动下单</b>
+    <span class="tag gray">{{ data && data.index ? data.index.date : '—' }}</span>
+    <!-- 非盘中：后端按市场状态把行情缓存拉长，这里必须说明「看到的是收盘价」 -->
+    <span v-if="mkt && !mkt.is_live" class="tag amber">{{ mktText }}</span>
+  </div>
+
+  <div v-if="err" class="err">{{ err }}</div>
+  <div v-if="data && c.warning" class="err" style="background:#fffbeb;border-color:#fde68a;color:#92400e"
+       v-html="md(c.warning)"></div>
+  <div v-if="!data" class="loading">加载中…（首次打开会抓指数日线，约 3~8 秒）</div>
+
+  <template v-if="data && data.ok">
+
+    <!-- ── 一句话结论 ───────────────────────────── -->
+    <div class="verdict" :class="verdictClass">
+      <div class="t">一句话结论</div>
+      <div class="head" v-html="md(c.one_liner)"></div>
+      <div class="act" v-html="'→ ' + md(c.action)"></div>
+    </div>
+
+    <!-- ── 六格 ─────────────────────────────────── -->
+    <div class="grid">
+
+      <!-- ① 闸门：均线 -->
+      <div class="box">
+        <div class="h">闸门 · 均线状态 <span class="tag red">一票否决</span></div>
+        <div class="v" :style="{color: maColor}">{{ maWord }}</div>
+        <div class="n" v-html="md(c.gate)"></div>
+      </div>
+
+      <!-- ② 位置：点位分位（三档并列） -->
+      <div class="box">
+        <div class="h">位置 · 点位分位 <span class="tag gray">价格分位</span></div>
+        <div class="kv">
+          <div v-for="y in [1,3,10]" :key="y">
+            <div class="k">近 {{ y }} 年</div>
+            <div class="x">{{ fmtP(idx.pct['y'+y]) }}</div>
+          </div>
+        </div>
+        <div class="n"><span v-html="md(c.position)"></span><br>
+          <span style="color:#9aa1ad">三档必须并列看：只给一档一定误导。</span></div>
+      </div>
+
+      <!-- ③ 波动：RV -->
+      <div class="box">
+        <div class="h">波动 · 已实现波动率 RV</div>
+        <div class="kv">
+          <div><div class="k">20 日</div><div class="x">{{ fmtPct(idx.rv.d20) }}</div></div>
+          <div><div class="k">60 日</div><div class="x">{{ fmtPct(idx.rv.d60) }}</div></div>
+        </div>
+        <div class="n">120 日 {{ fmtPct(idx.rv.d120) }} · 250 日 {{ fmtPct(idx.rv.d250) }}<br>
+          20 日 = 当前波动，60 日 = 中期基准。</div>
+      </div>
+
+      <!-- ④ 定价：ATM IV（说明走悬停浮层，不占版面） -->
+      <div class="box tcard" :class="{pin: openKey === 'iv'}" @mouseenter="place($event,'iv')">
+        <div class="h">定价 · ATM IV <span class="tag">{{ ivWord }}</span>
+          <span class="qi" title="ATM / 分位 / 为什么要取认购认沽平均"
+                @click.stop="toggle('iv')">?</span>
+        </div>
+        <div class="v">{{ fmtPct(iv.atm_iv) }}</div>
+        <div class="n">
+          <span style="color:#9aa1ad">平值期权的隐含波动率</span> ·
+          {{ iv.expiry }} 到期（剩 {{ iv.dte }} 天）<br>
+          <b>分位 {{ fmtP(iv.pct_all) }}</b>
+          <span style="color:#9aa1ad">—— 越低越便宜</span><br>
+          历史上 <b>{{ fmtP(100 - iv.pct_all) }}</b> 的日子比今天更贵<br>
+          全历史 {{ fmtP(iv.pct_all) }} · 近1年 {{ fmtP(iv.pct_y1) }} · 近3年 {{ fmtP(iv.pct_y3) }}<br>
+          历史中位 <b>{{ fmtPct(iv.p50) }}</b>
+          <span style="color:#9aa1ad">（今天比它低 {{ ivVsMed }}）</span><br>
+          <span style="color:#9aa1ad">样本 {{ iv.n }} 天（{{ iv.from }} 起）</span>
+        </div>
+        <div class="pop" :class="{r: side.iv}" v-html="caliberHtml"></div>
+      </div>
+
+      <!-- ⑤ 溢价：VRP -->
+      <div class="box tcard" :class="{pin: openKey === 'vrp'}" @mouseenter="place($event,'vrp')">
+        <div class="h">溢价 · VRP <span class="tag" :class="vrpTagCls">{{ vrpWord }}</span>
+          <span class="qi" title="VRP / 前瞻 RV 是什么"
+                @click.stop="toggle('vrp')">?</span>
+        </div>
+        <template v-if="vrp">
+          <div class="v" :style="{color: vrpColor}">{{ fmtPP(vrp.iv_minus_mean) }}</div>
+          <div class="n">
+            <b>正数 = 收的比赔的多；负数 = 倒亏</b><br>
+            = IV {{ fmtPct(iv.atm_iv) }} − 前瞻 RV 均值 {{ fmtPct(vrp.fwd_mean) }}<br>
+            同类时点 {{ vrp.n }} 个（历史 20 日 RV ≈ {{ fmtPct(vrp.cur_rv) }}）<br>
+            随后 60 日实际 RV 落在 {{ fmtPct(vrp.fwd_lo) }} ~ {{ fmtPct(vrp.fwd_hi) }}<br>
+            <span style="color:#9aa1ad">取「中位」口径则 {{ fmtPP(vrp.iv_minus_med) }}</span>
+          </div>
+        </template>
+        <div v-else class="n">同类时点不足，算不出 VRP。</div>
+        <div class="pop" :class="{r: side.vrp}" v-html="vrpHtml"></div>
+      </div>
+
+      <!-- ⑥ 仓位：名义敞口 -->
+      <div class="box">
+        <div class="h">仓位 · 名义敞口 <span class="tag gray">要你输入</span></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+          <span class="lb">本金</span>
+          <input type="number" v-model.number="capital" placeholder="500000">
+          <span class="lb">元</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <span class="lb">卖</span>
+          <input type="number" v-model.number="lots" placeholder="10">
+          <span class="lb">张（平值 {{ iv.strike ? iv.strike.toFixed(3) : '—' }}）</span>
+        </div>
+        <template v-if="capital > 0 && lots > 0 && iv.strike">
+          <div class="v">{{ nominalPct }}</div>
+          <div class="n">名义敞口 {{ fmtMoney(nominal) }} 元<br>
+            合约单位 10000 份 × 行权价 {{ iv.strike.toFixed(3) }} × {{ lots }} 张</div>
+        </template>
+        <div v-else class="n">填本金和张数即可算名义敞口。</div>
+        <div class="n" style="color:#9aa1ad">
+          ⚠️ 这里给的是<b>名义敞口</b>不是保证金 —— 保证金只有名义的约 12%，
+          按保证金算会得出「年化 100%+」的假象。
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── 全部跟踪指数的均线 ───────────────────── -->
+    <div class="card">
+      <h2 style="font-size:14px;margin:0 0 10px;font-weight:650">
+        各指数均线状态（「所有均线之下 = 不裸卖沽」的判据）
+        <span class="tag gray" v-if="data.peers.length">
+          均截至 {{ data.peers[0].date }}（= IV 的日期）
+        </span>
+      </h2>
+      <table>
+        <thead>
+          <tr><th>标的</th><th>指数</th><th>收盘</th><th>均线状态</th>
+              <th>近1年</th><th>近3年</th><th>近10年</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="p in data.peers" :key="p.underlying">
+            <td>{{ p.underlying }}</td>
+            <td>{{ p.index_name }}</td>
+            <td>{{ p.close.toFixed(2) }}</td>
+            <td :style="{color: p.verdict === 'below_all' ? 'var(--green)' : (p.verdict === 'above_all' ? 'var(--red)' : 'var(--amber)')}">
+              {{ maWordOf(p) }}
+            </td>
+            <td>{{ fmtP(p.pct.y1) }}</td>
+            <td>{{ fmtP(p.pct.y3) }}</td>
+            <td>{{ fmtP(p.pct.y10) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="foot">
+        收盘价与均线对比是<b>「能不能裸卖」</b>的闸门：所有均线之下不裸卖沽、所有均线之上不卖购
+        （⚠️ 这里说的是<b>裸卖</b>；均线交错时可以双卖）。
+      </div>
+    </div>
+
+    <div class="foot">
+      本页只回答三件事：① 该不该建/加多头敞口 ② 收的钱够不够赔 ③ 仓位有没有超标。<br>
+      移仓价差、建仓成本、期限结构<b>不在此页</b>重复 —— 前两个首页和决策台已有，
+      期限结构在贴水期主要由分红结构决定、不是择时信号。
+    </div>
+  </template>
+</div>
+</div>
+
+<script src="https://cdn.bootcdn.net/ajax/libs/vue/3.4.21/vue.global.prod.js"></script>
+<script>
+// ── 环境适配（本地 / 线上同一份代码，与 option-daily.html 完全一致）─────
+function isLocalPage(){
+  const h = location.hostname;
+  return (h === '127.0.0.1' || h === 'localhost' || h === '');
+}
+function navBase(){ return isLocalPage() ? './' : '/'; }
+function navFile(name){ return isLocalPage() ? (name + '.html') : name; }
+function hrefOf(name){ return navBase() + navFile(name); }
+// ⚠️ 线上 nginx: location /optarb_api/ { proxy_pass ...:8104/api/; }
+//    proxy_pass 是「替换」不是「相加」，所以前端写 /optarb_api/xxx，不能再自带 /api。
+function apiBase(){ return isLocalPage() ? '/api' : '/optarb_api'; }
+const API = apiBase();
+function requestUrl(path){
+  let p = path.startsWith('/') ? path : ('/' + path);
+  if (p.startsWith('/api/')) p = p.slice(4);
+  return API + p;
+}
+</script>
+<script>
+const { createApp, ref, computed, onMounted } = Vue;
+
+/** 带超时 + 重试一次。★ 绝不裸 fetch：任一请求卡住会让整页永久白屏（future 项目教训） */
+async function get(url, ms = 20000) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), ms);
+    try {
+      const r = await fetch(url, { signal: ac.signal });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return await r.json();
+    } catch (e) {
+      if (attempt === 1) throw e;
+    } finally { clearTimeout(t); }
+  }
+}
+
+const UNDS = [
+  ['510300', '沪深300ETF'],
+  ['510050', '上证50ETF'],
+  ['510500', '中证500ETF'],
+  ['588000', '科创50ETF（华夏）'],
+  ['588080', '科创50ETF（易方达）'],
+];
+
+createApp({
+  setup() {
+    const und = ref('510300');
+    const data = ref(null);
+    const err = ref('');
+    const capital = ref(0);
+    const lots = ref(0);
+    // 说明浮层：桌面靠 :hover，触屏靠点「?」固定。
+    // ★ 只允许同时开一个（openKey），且点浮层自身或页面空白处即关闭 ——
+    //   否则手机端（单列布局）浮层会盖住下一张卡片的「?」，切不过去（实测踩过）。
+    const openKey = ref('');
+    const side = ref({});
+    function toggle(k) { openKey.value = (openKey.value === k ? '' : k); }
+    function closeAll() { openKey.value = ''; }
+    function place(ev, k) {
+      try {
+        const r = ev.currentTarget.getBoundingClientRect();
+        const w = Math.min(400, window.innerWidth - 40);
+        side.value = { ...side.value, [k]: r.left + w > window.innerWidth - 16 };
+      } catch (e) { side.value = { ...side.value, [k]: false }; }
+    }
+
+    const idx = computed(() => (data.value && data.value.index) || {});
+    const iv = computed(() => (data.value && data.value.iv) || {});
+    const vrp = computed(() => (data.value && data.value.vrp) || null);
+    const c = computed(() => (data.value && data.value.conclusion) || {});
+
+    const verdictClass = computed(() => {
+      const cn = c.value.can_naked_put;
+      if (cn === false) return 'stop';
+      if (cn === true && c.value.tags && c.value.tags.length <= 1) return 'go';
+      return '';
+    });
+
+    const maWord = computed(() => {
+      const v = (idx.value.ma || {}).verdict;
+      return { below_all: '全部均线之下', above_all: '全部均线之上', mixed: '均线交错' }[v] || '数据不足';
+    });
+    const maColor = computed(() => {
+      const v = (idx.value.ma || {}).verdict;
+      return v === 'below_all' ? 'var(--green)'
+           : v === 'above_all' ? 'var(--red)' : 'var(--amber)';
+    });
+    const maWordOf = (p) => {
+      const v = p.verdict;
+      if (v === 'below_all') return `全 ${p.n_ma} 条之下`;
+      if (v === 'above_all') return `全 ${p.n_ma} 条之上`;
+      return `${p.n_above} 上 / ${p.n_below} 下`;
+    };
+
+    const ivWord = computed(() => {
+      const p = iv.value.pct_all;
+      if (p == null) return '—';
+      if (p <= 20) return '偏薄';
+      if (p <= 45) return '偏低';
+      if (p <= 60) return '中性';
+      if (p <= 80) return '偏高';
+      return '很厚';
+    });
+
+    const vrpColor = computed(() => {
+      const v = vrp.value && vrp.value.iv_minus_mean;
+      if (v == null) return 'var(--ink)';
+      return v <= 0 ? 'var(--green)' : (v < 0.02 ? 'var(--amber)' : 'var(--red)');
+    });
+    // VRP 用大白话给个结论词（正数=收的比赔的多；负数=倒亏）
+    const vrpWord = computed(() => {
+      const v = vrp.value && vrp.value.iv_minus_mean;
+      if (v == null) return '—';
+      return v <= 0 ? '倒亏' : (v < 0.02 ? '偏薄' : '占优');
+    });
+    // 颜色跟本页既有约定一致（绿 = 低/负，红 = 高/正，即 A 股涨红跌绿）
+    const vrpTagCls = computed(() => {
+      const v = vrp.value && vrp.value.iv_minus_mean;
+      if (v == null) return 'gray';
+      return v <= 0 ? 'green' : (v < 0.02 ? 'amber' : 'red');
+    });
+
+    const nominal = computed(() => (iv.value.strike || 0) * 10000 * (lots.value || 0));
+    const nominalPct = computed(() => {
+      if (!capital.value) return '—';
+      return (nominal.value / capital.value * 100).toFixed(1) + '%';
+    });
+
+    // 说明文案（后端下发，页面只做换行/加粗渲染）
+    const md = (t) => String(t || '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+    const caliberHtml = computed(() => md((data.value && data.value.caliber_note) || ''));
+    const vrpHtml = computed(() => md((data.value && data.value.vrp_note) || ''));
+
+    // 「今天比历史中位低多少」—— 给 IV 数值配一把尺子，避免拿 IV 去和分位比大小
+    const ivVsMed = computed(() => {
+      const a = iv.value.p50, b = iv.value.atm_iv;
+      if (a == null || b == null) return '—';
+      return Math.abs((a - b) * 100).toFixed(1) + ' pp';
+    });
+
+    // ── 市场状态（2026-10-03）────────────────────────────────────
+    // 后端 core/market_calendar.py 在非盘中会把行情缓存拉长（周末/假期缓存到下次开市），
+    // 所以这里必须明确「看到的是最近一次收盘」，否则会被当成实时价。
+    const mkt = computed(() => (data.value && data.value.market) || null);
+    const mktText = computed(() => {
+      const m = mkt.value;
+      if (!m) return '';
+      return m.label + ' · 显示最近收盘'
+        + (m.next_session ? '（下次开市 ' + m.next_session + '）' : '');
+    });
+
+    const fmtPct = (v) => (v == null ? '—' : (v * 100).toFixed(2) + '%');
+    // ★ 分位已经是 0~100，不能再 ×100（踩过：近1年分位显示成 4773.66%）
+    const fmtP = (v) => (v == null ? '—' : v.toFixed(1) + '%');
+    const fmtPP = (v) => (v == null ? '—' : (v * 100 >= 0 ? '+' : '') + (v * 100).toFixed(1) + ' pp');
+    const fmtMoney = (v) => (v == null ? '—' : Math.round(v).toLocaleString('zh-CN'));
+
+    async function load() {
+      err.value = '';
+      try {
+        const j = await get(requestUrl(`/entry?underlying=${und.value}`), 30000);
+        if (!j.ok) {
+          err.value = j.error || '后端没有返回数据';
+          return;
+        }
+        data.value = j;
+      } catch (e) {
+        err.value = '取数失败：' + (e && e.message ? e.message : e) +
+          '（首次打开要抓指数日线，稍等再试；若一直失败请看服务控制台）';
+      }
+    }
+
+    onMounted(load);
+
+    return { und, UNDS, data, err, capital, lots, idx, iv, vrp, c,
+             verdictClass, maWord, maColor, maWordOf, ivWord, vrpColor, vrpWord, vrpTagCls,
+             nominal, nominalPct, caliberHtml, vrpHtml, ivVsMed, mkt, mktText,
+             openKey, side, toggle, closeAll, place,
+             md, fmtPct, fmtP, fmtPP, fmtMoney, load, hrefOf };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>

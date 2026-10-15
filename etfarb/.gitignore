@@ -1,0 +1,85 @@
+# ============================================================
+# 源码仓（仓根 = src/，物理隔离）
+# docs/ deploy/ data/ database/ log/ 等已在仓库外；
+# 本文件只管 src 内部可能混入的「敏感 / 非源码」内容。
+# 哨兵脚本：D:\Study\ARB\_githooks\pre-commit
+# ============================================================
+
+# --- 凭据 / 密钥（绝不入库；真实凭据在 D:\Study\ARB\account_info）---
+.env
+**/.env
+secrets.py
+secrets.env
+**/secrets.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+**/credentials*.json
+FutuOpenD.xml
+*.kxf
+
+# --- 数据库 / 运行时数据 ---
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+data/
+log/
+logs/
+*.log
+*.lock
+
+# --- 个人脚本目录（不上传；2026-10-10 东哥定）---
+/scripts/
+
+# --- 文档 / Markdown（一律不上传；2026-10-10 东哥定）---
+**/*.md
+**/*.markdown
+**/AGENTS.md
+**/agents.md
+**/docs/
+
+# --- AI / 工具运行态 ---
+proxy.bat
+Proxy.bat
+.workbuddy/
+.workbuddy-ai/
+.codegraph/
+.open-mem/
+.opencode/
+.omo/
+_tmp/
+.tmp/
+_ai_backup/
+_ai_files/
+scratch/
+
+# --- 依赖与构建产物 ---
+node_modules/
+**/node_modules/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyd
+.venv/
+venv/
+dist/
+.vite/
+.vite-*/
+*.tsbuildinfo
+
+# --- 备份 / 归档 ---
+**/*.bak
+**/*.bak-*
+**/*.bundle
+.git-archive-*/
+
+# --- 编辑器 / 系统 ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>卖沽移仓价差 · Optarb</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#fff; --line:#e7e9ee; --txt:#1f2329; --dim:#8a9099;
+    --up:#d92b2b; --down:#0a9e4a; --accent:#2b6cb0; --warn:#c8871a;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:540px;margin:0 auto;padding:10px 10px 48px}
+  .bar{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+  .bar h1{font-size:16px;margin:0;font-weight:600;flex:1;min-width:120px}
+  select,input{font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--line);
+       border-radius:8px;background:#fff;color:var(--txt)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+  .rating{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+  .rating .lv{font-size:19px;font-weight:700}
+  .rating .lv.g{color:var(--up)} .rating .lv.y{color:var(--warn)} .rating .lv.n{color:var(--dim)}
+  .reason{color:#4a5058;font-size:13px}
+  .meta{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:12.5px;color:var(--dim)}
+  .meta b{color:var(--txt);font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;
+        font-variant-numeric:tabular-nums}
+  th,td{padding:6px 3px;text-align:right;border-bottom:1px solid #f0f1f4;white-space:nowrap}
+  th{color:var(--dim);font-weight:500;font-size:12px;position:sticky;top:0;background:#fff}
+  th:first-child,td:first-child{text-align:left;padding-left:4px}
+  td.net{font-weight:700}
+  .up{color:var(--up)} .down{color:var(--down)}
+  .tag{font-size:11px;padding:1px 5px;border-radius:5px;background:#f0f1f4;color:#666}
+  .tag.itm{background:#fdecec;color:#c0392b}
+  /* 非盘中提示（休市/午休/盘前）：琥珀色 */
+  .tag.amber{background:#fef3c7;color:#92400e}
+  tr.zero td{color:#b0b4bb}
+  .note{font-size:11.5px;color:var(--dim);line-height:1.7;margin-top:8px}
+  .empty{padding:28px 12px;text-align:center;color:var(--dim);font-size:13px}
+  .err{color:#c0392b;font-size:13px;padding:10px;background:#fdecec;border-radius:8px}
+  .nav{display:flex;gap:6px;margin-bottom:10px}
+  .nav a{font-size:12.5px;text-decoration:none;color:var(--dim);padding:5px 11px;
+         border:1px solid var(--line);border-radius:8px;background:#fff}
+  .nav a.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+  .bar .lb{font-size:12.5px;color:var(--dim);font-weight:500}
+  .bar .arrow{color:var(--dim);font-size:14px;margin:0 -3px}
+  /* 数据陈旧提示（库内最新日期 < 今天时显示） */
+  .bar .stale{font-size:11.5px;color:#c8871a;font-weight:600;line-height:1.4}
+  /* 「更新数据」按钮（2026-09-28 东哥要，替代额外的 bat） */
+  .upd{font:inherit;font-size:12.5px;padding:5px 12px;border:1px solid #c9d4e6;
+       border-radius:8px;background:#fff;color:#1f6feb;cursor:pointer;font-weight:600;
+       white-space:nowrap}
+  .upd:disabled{cursor:default;color:#8a9099;border-color:var(--line)}
+  .upd.busy{color:#c8871a;border-color:#f0d9a8;background:#fffbf2}
+  .upd.done{color:#1a9c5b;border-color:#bfe3cf;background:#f4fbf7}
+  button.mini{font:inherit;font-size:12px;padding:4px 9px;border:1px solid var(--line);
+       border-radius:7px;background:#fff;color:var(--accent);cursor:pointer}
+  button.mini:hover{background:#f0f5fb}
+</style>
+</head>
+<body>
+<div id="app" class="wrap">
+
+  <div class="nav">
+    <a :href="hrefOf('option')">持仓体检</a>
+    <a class="on" :href="hrefOf('option-daily')">卖沽移仓价差（日报）</a>
+    <a :href="hrefOf('option-risk')">移仓决策台</a>
+    <a :href="hrefOf('option-entry')">入场判断</a>
+  </div>
+
+  <div class="bar">
+    <h1>卖沽移仓价差</h1>
+    <select v-model="variety" @change="reload">
+      <option v-for="(meta, key) in varieties" :key="key" :value="key">{{ key }} {{ meta.name }}</option>
+    </select>
+    <select v-model="date" @change="load">
+      <option v-for="d in dates" :key="d" :value="d">{{ d }}</option>
+    </select>
+    <span class="lb" style="font-size:12.5px;color:var(--dim)">张数</span>
+    <input type="number" v-model.number="lots" min="1" style="width:64px" @change="load" />
+    <!-- ★ 2026-09-28 加：数据没更新时页面必须自己说出来。
+         踩坑：东哥首次实盘打开，下拉框最新还是编程序那天（9-24），
+         因为当时根本没有更新入口 —— 页面毫无提示，只能靠人猜。 -->
+    <span class="stale" v-if="staleHint">{{ staleHint }}</span>
+    <!-- ★ 2026-09-28 东哥要：页面上直接更新数据，不要额外的 bat 文件 -->
+    <button class="upd" :class="{busy:updRunning, done:updDone}" @click="doUpdate"
+            :disabled="updRunning" :title="updMsg || '抓取中金所最新日行情入库'">
+      {{ updRunning ? '更新中…' : (updDone ? '✓ 已更新' : '更新数据') }}
+    </button>
+    <!-- 非盘中：后端按市场状态拉长行情缓存，这里说明「看到的是收盘价」 -->
+    <span v-if="mkt && !mkt.is_live" class="tag amber">{{ mktText }}</span>
+  </div>
+
+  <!-- 移仓区间：买回哪个 + 卖出哪个。默认「当月 → 次月」，可自定义（东哥 2026-09-27 要） -->
+  <div class="bar">
+    <span class="lb">移仓区间</span>
+    <select v-model="near" @change="load">
+      <option v-for="e in expiries" :key="e" :value="e">买回 {{ e }}</option>
+    </select>
+    <span class="arrow">→</span>
+    <select v-model="far" @change="load">
+      <option v-for="e in expiries" :key="e" :value="e">卖出 {{ e }}</option>
+    </select>
+    <button class="mini" v-if="!isDefault" @click="resetRange">恢复默认</button>
+  </div>
+
+  <div v-if="err" class="err">{{ err }}</div>
+
+  <div v-if="!data && !err" class="card empty">加载中…</div>
+
+  <template v-if="data && data.ok">
+    <div class="card">
+      <div class="rating">
+        <span class="lv" :class="lvClass">{{ data.rating.level }}</span>
+        <span class="reason">{{ data.rating.reason }}</span>
+      </div>
+      <div class="meta">
+        <span>买回 <b>{{ data.near }}</b> 剩 <b>{{ data.dte_near }}</b> 天</span>
+        <span>卖出 <b>{{ data.far }}</b> 剩 <b>{{ data.dte_far }}</b> 天</span>
+        <span>指数 <b>{{ fmt(data.spot) }}</b></span>
+        <span>远期(卖出腿) <b>{{ fmtD(data.forward_far) }}</b></span>
+        <span v-if="data.discount_far !== null">
+          贴水(卖出腿) <b class="up">{{ data.discount_far > 0 ? '+' : '' }}{{ fmtD(data.discount_far) }} {{ data.unit || '点' }} · {{ data.discount_far_annual > 0 ? '+' : '' }}{{ data.discount_far_annual }}% 年化</b>
+        </span>
+        <span v-if="data.rating.iv_gap !== null">
+          IV差 <b>{{ data.rating.iv_gap > 0 ? '+' : '' }}{{ data.rating.iv_gap }}</b> vol点
+        </span>
+      </div>
+    </div>
+
+    <div class="card" style="padding:6px 10px">
+      <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>行权价</th><th>状态</th><th>买回</th><th>卖出</th>
+            <th>净收</th><th>净收(元)</th><th>名义(元)</th><th>IV近</th><th>IV远</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="r in data.rows" :key="r.strike" :class="{zero:r.zero_vol}">
+            <td>{{ fmtK(r.strike) }}</td>
+            <td><span class="tag" :class="{itm:r.state==='实值'}">{{ r.state }}</span></td>
+            <td>{{ fmtP(r.buyback) }}</td>
+            <td>{{ fmtP(r.sell) }}</td>
+            <td class="net" :class="r.net >= 0 ? 'up' : 'down'">{{ fmtP(r.net) }}</td>
+            <td>{{ money(r.net * data.multiplier * lots) }}</td>
+            <td>{{ money(r.strike * data.multiplier * lots) }}</td>
+            <td>{{ r.iv_near === null ? '—' : r.iv_near.toFixed(1) }}</td>
+            <td>{{ r.iv_far === null ? '—' : r.iv_far.toFixed(1) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="note">
+        义务仓：买回 <b>{{ data.near }}</b> + 卖出 <b>{{ data.far }}</b>
+        <template v-if="data.near === data.far">（⚠️ 两端相同，无法算价差）</template>
+        · 收盘价口径（零成交用结算价）<br />
+        净收 = 卖出腿收盘 − 买回腿收盘；<b>同行权价</b> → 内在价值抵消 → 净收即时间价值差<br />
+        净收(元) = 净收 × <b>{{ data.multiplier }}</b>{{ data.unit==='元' ? ' 份/张' : ' 元/点' }} × 张数；
+        名义(元) = 行权价 × <b>{{ data.multiplier }}</b>{{ data.unit==='元' ? ' 份/张' : ' 元/点' }} × 张数<br />
+        IV 由 Black-76 反推，远期取<b>标的收盘价</b><br />
+        <template v-if="data.unit==='元'">ETF 期权：合约单位 10000 份/张，行权价/权利金单位为<b>元</b>；
+        官方端点不含成交量，价格取收盘（与结算价相同则等价）。</template>
+        <template v-else>灰色行 = 该档当月或次月零成交（价格取自结算价，仅供参考）</template>
+      </div>
+    </div>
+  </template>
+
+  <div v-if="data && !data.ok" class="card err">{{ data.error }}</div>
+</div>
+
+<script src="https://cdn.bootcdn.net/ajax/libs/vue/3.4.21/vue.global.prod.js"></script>
+<script>
+// ── 环境适配（本地 / 线上同一份代码）───────────────────────────
+// ⚠️ 不要用 './xxx.html' 切换页面：线上 nginx 给每个短地址写了
+//    `location = /option` 精确匹配，页面在 /option 下时相对链接
+//    会被解析成 /migrate.html → 404。本地没 nginx 看不出来。
+function isLocalPage(){
+  const h = location.hostname;
+  return (h === '127.0.0.1' || h === 'localhost' || h === '');
+}
+/** 页面互链前缀：本地 './'，线上 '/' */
+function navBase(){ return isLocalPage() ? './' : '/'; }
+// ★ 2026-09-30 定稿（东哥拍板）：**本地文件名 = 线上路由名（+ .html 后缀）**，
+//   所以这里不需要任何映射表。
+//     本地 frontend/option.html        ↔ 线上 /option
+//          frontend/option-daily.html  ↔      /option-daily
+//          frontend/option-risk.html   ↔      /option-risk
+//   ⚠️ 之前的坑：本地叫 index/migrate/expiry.html，与路由名对不上，
+//      于是「持仓体检 / 日报 / 移仓决策台」三个链接在本地全是 404。
+//      文件名跟路由名对齐后，两边同一套逻辑、不再有特判。
+/** 页面文件名：本地加 .html，线上直接用短地址 */
+function navFile(name){ return isLocalPage() ? (name + '.html') : name; }
+/** 拼接同站页面链接，如 hrefOf('option-risk') */
+function hrefOf(name){ return navBase() + navFile(name); }
+
+// 线上 nginx: location /optarb_api/ { proxy_pass ...:8104/api/; }
+//   ⚠️ proxy_pass 是「替换」不是「相加」：前端写 /optarb_api/xxx，
+//      绝不能再自带 /api（否则 /optarb_api/api/xxx → 404）。
+function apiBase(){
+  return isLocalPage() ? '/api' : '/optarb_api';
+}
+const API = apiBase();
+function requestUrl(path){
+  let p = path.startsWith('/') ? path : ('/' + path);
+  if (p.startsWith('/api/')) p = p.slice(4);   // 剥掉调用处习惯写的 /api
+  return API + p;
+}
+</script>
+<script>
+const { createApp, ref, computed, onMounted } = Vue;
+
+createApp({
+  setup() {
+    const variety = ref('IO');
+    const date = ref('');
+    const dates = ref([]);
+    const data = ref(null);
+    const err = ref('');
+    // ★ 品种列表从 /api/meta 动态取（含 E300/E500 ETF 期权），不再写死
+    const varieties = ref({});
+    // ★ 2026-10-03：市场状态也来自同一个 /meta（不额外加请求）。
+    //   非盘中后端会把行情缓存拉长到下次开市，页面必须说明「这是最近收盘价」。
+    const mkt = ref(null);
+    const mktText = computed(() => {
+      const m = mkt.value;
+      if (!m) return '';
+      return m.label + ' · 显示最近收盘'
+        + (m.next_session ? '（下次开市 ' + m.next_session + '）' : '');
+    });
+    // ★ 张数：算「净收(元) / 名义(元)」用
+    const lots = ref(10);
+    // 移仓区间（东哥 2026-09-27 要）：「买回哪个 → 卖出哪个」。
+    // 默认「当月 → 次月」，可换成任意两个到期月。
+    // ⚠️ 后端要求 near < far（否则价差为负），前端只管传值，后端有校验。
+    const near = ref('');
+    const far = ref('');
+    const expiries = ref([]);
+    const isDefault = computed(() => {
+      if (!expiries.value.length) return true;
+      return near.value === expiries.value[0] && far.value === expiries.value[1];
+    });
+    function resetRange() {
+      near.value = expiries.value[0] || '';
+      far.value = expiries.value[1] || '';
+      load();
+    }
+
+    const lvClass = computed(() => {
+      const lv = data.value?.rating?.level || '';
+      if (lv === '集中移仓') return 'g';
+      if (lv === '可早移') return 'y';
+      return 'n';
+    });
+
+    const fmt = (v) => (v === null || v === undefined) ? '—'
+      : (Math.abs(v) < 100 ? v.toFixed(3) : v.toFixed(1));
+    // ★ 2026-09-30 加：远期 / 贴水 显示小数位按后端给的 discount_decimals
+    //   （股指 2 位「点」/ ETF 4 位「元」）。不能复用上面的 fmt ——
+    //   fmt 对 |v|<100 一律 3 位，ETF 的贴水只有 0.0057，3 位会把 0.0057 显示成 0.006。
+    const fmtD = (v) => (v === null || v === undefined) ? '—'
+      : Number(v).toFixed(data.value?.discount_decimals ?? 2);
+    // 元格式化（千分位 + 0 位小数），用于「净收(元)/名义(元)」
+    const money = (v) => {
+      if (v === null || v === undefined || isNaN(v)) return '—';
+      return Math.round(v).toLocaleString('zh-CN');
+    };
+    // 行权价显示：按后端给的小数位（股指 0 位 / ETF 3 位）
+    const fmtK = (v) => {
+      if (v === null || v === undefined) return '—';
+      return v.toFixed(data.value?.strike_decimals ?? 0);
+    };
+    // 权利金/净收显示：按后端给的小数位（股指 1 位 / ETF 4 位）
+    const fmtP = (v) => {
+      if (v === null || v === undefined) return '—';
+      return v.toFixed(data.value?.premium_decimals ?? 1);
+    };
+
+    // ★ 2026-09-28 加：库内最新日期 < 今天 → 明确提示（数据是陈的，不是程序坏了）
+    const todayIso = (() => {
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    })();
+    const staleHint = computed(() => {
+      const ds = dates.value;
+      if (!ds.length) return '';
+      if (ds[0] >= todayIso) return '';
+      return `⚠ 数据最新到 ${ds[0]}，${todayIso} 还没入库 — 点右侧「更新数据」`;
+    });
+
+    // ★ 2026-09-28：页面上直接更新数据（东哥：不要额外的 bat）。
+    //   服务端后台线程抓，这里只轮询状态 —— 同步等会撞上前端 20s 超时。
+    const updRunning = ref(false);
+    const updDone = ref(false);
+    const updMsg = ref('');
+    async function doUpdate() {
+      if (updRunning.value) return;
+      updRunning.value = true; updDone.value = false; updMsg.value = '';
+      try {
+        await get(requestUrl(`/update?days=10`), 20000);
+        for (let i = 0; i < 240; i++) {
+          await new Promise(r => setTimeout(r, 1500));
+          let s;
+          try { s = await get(requestUrl(`/update/status`), 10000); } catch (e) { continue; }
+          if (!s.running) {
+            updDone.value = !!s.success;
+            updMsg.value = s.success
+              ? `已更新（${(s.finished_at || '').slice(11, 16)}）`
+              : ('更新失败：' + (s.error || '未知错误'));
+            break;
+          }
+        }
+        if (updDone.value) { date.value = ''; await load(); }
+        else if (!updMsg.value) updMsg.value = '仍在后台更新，稍后刷新看看';
+      } catch (e) {
+        updMsg.value = '更新请求失败：' + e.message;
+      } finally {
+        updRunning.value = false;
+      }
+    }
+
+    // 带超时的请求（future 项目的教训：必须能超时，不能吊死）
+    async function get(url, ms = 20000) {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), ms);
+      try {
+        const r = await fetch(url, { signal: ac.signal });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return await r.json();
+      } finally { clearTimeout(t); }
+    }
+
+    async function load() {
+      err.value = '';
+      try {
+        const q = new URLSearchParams({ variety: variety.value });
+        if (date.value) q.set('date', date.value);
+        if (near.value) q.set('near', near.value);
+        if (far.value) q.set('far', far.value);
+        const j = await get(requestUrl(`/migrate?${q}`));
+        data.value = j;
+        if (j.ok) {
+          dates.value = j.available_dates || dates.value;
+          date.value = j.date;
+          if (j.expiries) expiries.value = j.expiries;
+          // 后端会把实际生效的 near/far 回传（含默认推导），回填到下拉框
+          if (j.near) near.value = j.near;
+          if (j.far) far.value = j.far;
+        }
+      } catch (e) {
+        err.value = '加载失败：' + (e.name === 'AbortError' ? '超时' : e.message);
+      }
+    }
+
+    async function reload() { date.value = ''; near.value = ''; far.value = ''; await load(); }
+
+    onMounted(async () => {
+      try {
+        const m = await get(requestUrl(`/meta`));
+        if (m.ok) { varieties.value = m.varieties || {}; mkt.value = m.market || null; }
+      } catch (e) { /* 忽略，下拉用空对象也能跑（只是没动态项） */ }
+      try {
+        const j = await get(requestUrl(`/migrate/dates`));
+        dates.value = j.dates || [];
+      } catch (e) { /* 忽略，load 里会再报 */ }
+      await load();
+    });
+
+    return { variety, date, dates, data, err, varieties, mkt, mktText, lots, lvClass, fmt, fmtD,
+             money, fmtK, fmtP, load, reload,
+             near, far, expiries, isDefault, resetRange, staleHint,
+             updRunning, updDone, updMsg, doUpdate, hrefOf };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>

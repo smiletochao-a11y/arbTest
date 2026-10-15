@@ -1,0 +1,1257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ETFarb 申赎套利看板</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #f6f8fb; color: #1f2937; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; }
+  .topbar { background: #fff; border-bottom: 1px solid #e5edf7; padding: 12px 20px; display: flex; align-items: center; gap: 16px; }
+  .logo { font-size: 18px; font-weight: 700; color: #2563eb; }
+  .logo span { color: #64748b; font-weight: 400; font-size: 13px; margin-left: 8px; }
+  .meta { margin-left: auto; font-size: 13px; color: #64748b; }
+  .fresh { padding: 2px 10px; border-radius: 999px; font-size: 12px; }
+  .fresh.ok { background: #dcfce7; color: #16a34a; }
+  .fresh.warn { background: #fef9c3; color: #d97706; }
+  .fresh.err { background: #fee2e2; color: #dc2626; }
+  .toolbar { padding: 10px 20px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .tab { padding: 5px 14px; border-radius: 999px; border: 1px solid #dbeafe; background: #fff; color: #2563eb; cursor: pointer; font-size: 13px; }
+  .tab.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+  .card { background: #fff; border-radius: 10px; margin: 0 20px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th { background: #eef5ff; padding: 9px 10px; text-align: right; font-weight: 600; color: #374151; white-space: nowrap; cursor: pointer; position: sticky; top: 0; }
+  thead th:first-child, thead th:nth-child(2), thead th:nth-child(3) { text-align: left; }
+  tbody td { padding: 8px 10px; text-align: right; border-top: 1px solid #f1f5f9; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  tbody td:first-child, tbody td:nth-child(2), tbody td:nth-child(3) { text-align: left; }
+  tbody tr:hover { background: #f6faff; }
+  tbody tr.iopv-row { cursor: pointer; }
+  .code { font-family: Consolas, monospace; color: #2563eb; }
+  .iopv { background: #f0f9ff; }
+  .bias { background: #fefce8; }
+  .up { color: #f44336; }
+  .down { color: #4caf50; }
+  .flat { color: #888; }
+  .muted { color: #64748b; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+  .tag.red { background: #fee2e2; color: #dc2626; font-weight: 600; }
+  .tag.green { background: #dcfce7; color: #16a34a; font-weight: 600; }
+  .tag.gray { background: #f1f5f9; color: #64748b; }
+  .tag.amber { background: #fef3c7; color: #d97706; font-weight: 600; }
+  .empty { padding: 40px; text-align: center; color: #94a3b8; }
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1f2937; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; display: none; z-index: 9; }
+  .logcard { padding: 0; }
+  .loghead { padding: 10px 14px; background: #eef5ff; font-weight: 600; color: #374151; font-size: 13px; border-bottom: 1px solid #e5edf7; }
+  .loghint { font-weight: 400; color: #94a3b8; font-size: 12px; }
+  .logbox { height: 180px; overflow-y: auto; padding: 8px 14px; font-family: Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.7; }
+  .logline { white-space: pre-wrap; word-break: break-all; }
+  .logline .lt { color: #94a3b8; margin-right: 8px; }
+  .logline.INFO { color: #475569; }
+  .logline.SIGNAL { color: #dc2626; font-weight: 700; }
+  .logline.WARN { color: #d97706; }
+  .logline.ERROR { color: #b91c1c; font-weight: 600; }
+  .recheck { color: #2563eb; text-decoration: none; font-size: 12px; }
+  .recheck:hover { text-decoration: underline; }
+  .hidden { display: none; }
+
+  /* 历史弹窗头部静态信息 */
+  .hist-head { display: flex; gap: 22px; flex-wrap: wrap; padding: 12px 16px; background: #f8fafc; border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+  .hist-head .hi { color: #64748b; }
+  .hist-head .hv { color: #1f2937; font-weight: 600; margin-left: 6px; }
+  .btn { padding: 4px 12px; border-radius: 6px; border: 1px solid #dbeafe; background: #eff6ff; color: #2563eb; cursor: pointer; font-size: 12px; }
+  .btn:hover { background: #dbeafe; }
+
+  /* ===== 顶层导航 + 跨境 ETF 看板（2026-09-17 立，仿集思录） ===== */
+  .nav { display: flex; gap: 6px; padding: 10px 20px 0; }
+  .nav button { padding: 7px 18px; border: 1px solid #e5edf7; border-radius: 8px 8px 0 0;
+    background: #eef2f7; color: #64748b; cursor: pointer; font-size: 14px; font-weight: 600; }
+  .nav button.active { background: #fff; color: #2563eb; border-color: #dbeafe; }
+  .nav button:hover { color: #2563eb; }
+  .view { display: none; }
+  .view.active { display: block; }
+  .mktwrap { margin: 0 20px 20px; background: #fff; border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow: hidden; }
+  .mktbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    padding: 9px 14px; border-bottom: 1px solid #eef2f7; font-size: 13px; color: #475569; }
+  .mktbar input[type=text] { padding: 5px 10px; border: 1px solid #dbeafe; border-radius: 6px;
+    font-size: 13px; width: 200px; outline: none; }
+  .mktbar input[type=text]:focus { border-color: #93c5fd; }
+  .mktbar .sp { margin-left: auto; color: #64748b; font-size: 12px; }
+  .mktscroll { overflow: auto; max-height: 72vh; }
+  table.mkt { border-collapse: separate; border-spacing: 0; font-size: 12px; width: max-content; min-width: 100%; }
+  table.mkt thead th { position: sticky; top: 0; z-index: 2; background: #eef5ff; padding: 7px 8px;
+    text-align: right; font-weight: 600; color: #374151; white-space: nowrap; cursor: pointer; user-select: none; }
+  table.mkt thead th.l { text-align: left; }
+  table.mkt thead th:hover { background: #e0ecff; }
+  table.mkt thead th .ar { color: #94a3b8; font-size: 10px; margin-left: 2px; }
+  table.mkt tbody td { padding: 6px 8px; text-align: right; border-top: 1px solid #f1f5f9;
+    white-space: nowrap; font-variant-numeric: tabular-nums; color: #1f2937; }
+  table.mkt tbody td.l { text-align: left; }
+  table.mkt tbody tr:hover td { background: #f6faff; }
+  /* 前两列冻结：s1 宽度固定，s2 的 left 依赖它 */
+  table.mkt th.s1, table.mkt td.s1 { position: sticky; left: 0; z-index: 1;
+    box-shadow: 1px 0 0 #eef2f7; background: #fff;
+    width: 66px; min-width: 66px; max-width: 66px; }
+  table.mkt th.s1 { background: #eef5ff; z-index: 3; }
+  table.mkt th.s2, table.mkt td.s2 { position: sticky; left: 66px; z-index: 1;
+    box-shadow: 1px 0 0 #eef2f7; background: #fff; min-width: 168px; }
+  table.mkt th.s2 { background: #eef5ff; z-index: 3; }
+  table.mkt tbody tr:hover td.s1, table.mkt tbody tr:hover td.s2 { background: #f6faff; }
+  .mkt td.null, .mkt td.null * { color: #cbd5e1; }
+  /* 换手率列豁免 null 灰：值由前端自算(volume_lot÷pre_share)，后端无 turnover 原始字段，
+     渲染器会误加 null 类。有值时显示正常正文色，空值仍走 muted 灰「—」。 */
+  .mkt td.turnover-cell, .mkt td.turnover-cell * { color: inherit; }
+  .mkt td.turnover-cell .muted { color: #64748b; }
+  /* 静态估值列：浅黄底色（对齐 LOF套利程序 col-static-val #fff7ed / 表头 #ffedd5） */
+  table.mkt tbody td.col-static-val { background-color: #fff7ed !important; }
+  table.mkt thead th.col-static-val { background-color: #ffedd5 !important; color: #1f2937; text-align: center; }
+  table.mkt tbody tr:hover td.col-static-val { background-color: #ffedd5 !important; }
+  .col-sub { display: block; font-size: 9px; color: #64748b; font-weight: 400; margin-top: 1px; line-height: 1.1; }
+  .col-static-link { cursor: pointer; }
+  .col-static-link:hover { text-decoration: underline; }
+  .col-static-val { cursor: pointer; }          /* 整格可点（点任意位置看历史） */
+  .col-static-val:hover { background: #eef5ff; }
+  /* 商品期货(F) 驱动列：AG0 昨结算价 + SI 交叉验证（ETFarb 引用 LOFarb） */
+  table.mkt tbody td.col-driver { background-color: #f0f9ff !important; }
+  table.mkt thead th.col-driver { background-color: #dbeafe !important; color: #1f2937; text-align: center; }
+  table.mkt tbody tr:hover td.col-driver { background-color: #dbeafe !important; }
+  .col-driver-sub { display: block; font-size: 9px; color: #64748b; font-weight: 400; margin-top: 1px; line-height: 1.1; }
+  .pcf-link { color: #2563eb; text-decoration: none; font-weight: 600; white-space: nowrap; }
+  .pcf-link:hover { text-decoration: underline; }
+  .warn-dot { color: #d97706; font-weight: 700; margin-left: 2px; cursor: help; }
+  .mktbar label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: #475569; }
+  .tag.sm { padding: 1px 6px; font-size: 11px; }
+  .woody-badge { display: inline-block; margin-left: 5px; padding: 1px 6px; font-size: 11px;
+    line-height: 1.4; border-radius: 4px; background: #ecfeff; color: #0e7490;
+    border: 1px solid #a5f3fc; font-weight: 600; vertical-align: middle;
+    cursor: help; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">ETFarb<span>低风险投资</span></div>
+  <div class="meta">
+    更新 <span id="updated">--</span>
+    <span class="fresh" id="fresh">--</span>
+  </div>
+</div>
+
+<div class="nav" id="nav"></div>
+
+<div class="toolbar" id="toolbar"></div>
+
+<div id="mainView" class="view active">
+<div class="card">
+  <table>
+    <div class="toolbar" id="mainToolbar" style="display:flex;gap:14px;align-items:center;padding:8px 12px;border-bottom:1px solid #eef2f7;">
+      <label><input type="checkbox" id="mainWatch" onchange="mktOnlyWatch=this.checked;renderMainBoard();">仅看关注</label>
+      <label><input type="checkbox" id="mainCompact" checked onchange="mktCompact=this.checked;renderMainBoard();">紧凑</label>
+      <button class="btn" onclick="loadMainBoard(1)">刷新</button>
+      <span class="sp" id="mainSp">—</span>
+    </div>
+    <div id="mainFxBar" style="padding:6px 12px;font-size:12px;color:#475569;background:#f8fafc;border-bottom:1px solid #eef2f7;"></div>
+    <div class="mktscroll">
+      <table class="mkt">
+        <thead><tr id="mainHead"></tr></thead>
+        <tbody id="mainBody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="mainEmpty">切换到「测试看板」标签后自动加载…</div>
+  </table>
+  <div class="empty" id="empty">等待数据……（后端服务启动后自动刷新）</div>
+</div>
+</div>
+
+<!-- 历史记录弹窗 -->
+<div id="historyModal" class="hidden" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.5); z-index:100;">
+  <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:12px; width:94vw; max-width:1500px; max-height:88vh; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.3);">
+    <div style="padding:16px 20px; border-bottom:1px solid #e5edf7; display:flex; align-items:center; gap:12px;">
+      <div style="font-weight:700; font-size:16px;" id="historyTitle">历史记录</div>
+      <div style="margin-left:auto; font-size:12px; color:#64748b;" id="historySub"></div>
+      <button onclick="closeHistory()" style="margin-left:12px; padding:4px 12px; border:1px solid #e5edf7; border-radius:6px; cursor:pointer; background:#fff;">关闭</button>
+    </div>
+    <div style="padding:16px 20px; overflow-y:auto; overflow-x:auto; max-height:calc(88vh - 60px);">
+      <div class="hist-head" id="histHead"></div>
+      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead>
+          <tr style="background:#eef5ff;">
+            <th style="padding:8px; text-align:left; border-bottom:1px solid #e5edf7;">日期</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">ETF收盘价</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">收盘IOPV</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;" title="(ETF收盘价 − 收盘IOPV) ÷ 收盘IOPV × 10000。两列同为 D 日收盘口径，故本列随「收盘IOPV」一起，在 D 日收盘前为空。">收盘折溢价(%)</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">净值Nav</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">现金差额</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">预估现金</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;" title="实际净值 = 官方净值Nav(D) × 买入结算汇兑(适用日 = D 的当日真实值，D 日盘后公布) ÷ FX中间价(D)。回看口径：反映该日实际发生的换汇成本。分母用官方Nav(D)——本行四个因子全是 D 日同一天，无跨日污染；测试看板因盘中拿不到 Nav(T)，改用当日 IOPV，且结算汇率只能取 T-1，故两页故意不同。需要该日 D+1 公告的官方净值，未发布则显「待接入」。">实际折溢价(T结算)%</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">FX-中间价</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;" title="适用日 = 本行日期 D 的当日真实结算汇兑比率（D 日盘后由上交所公布）。历史页是回看，故用当日真值；测试看板同名列用 T-1（当天盘中拿不到当日值）。">买入结算汇兑</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">计算篮子</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">官方篮子市值(替代金额)</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">最小申赎单位净值</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">误差(%)</th>
+            <th style="padding:8px; text-align:center; border-bottom:1px solid #e5edf7;">状态</th>
+          </tr>
+        </thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- PCF 成分明细弹窗 -->
+<div id="pcfModal" class="hidden" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.5); z-index:100;">
+  <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:12px; width:90vw; max-width:900px; max-height:85vh; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.3);">
+    <div style="padding:16px 20px; border-bottom:1px solid #e5edf7; display:flex; align-items:center; gap:12px;">
+      <div style="font-weight:700; font-size:16px;" id="pcfTitle">PCF 成分明细</div>
+      <div style="margin-left:auto; font-size:12px; color:#64748b;" id="pcfSub"></div>
+      <button onclick="closePcf()" style="margin-left:12px; padding:4px 12px; border:1px solid #e5edf7; border-radius:6px; cursor:pointer; background:#fff;">关闭</button>
+    </div>
+    <div style="padding:16px 20px; overflow-y:auto; max-height:calc(85vh - 60px);">
+      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead>
+          <tr style="background:#eef5ff;">
+            <th style="padding:8px; text-align:left; border-bottom:1px solid #e5edf7;">代码</th>
+            <th style="padding:8px; text-align:left; border-bottom:1px solid #e5edf7;">名称</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">数量</th>
+            <th style="padding:8px; text-align:center; border-bottom:1px solid #e5edf7;">替代标志</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">申购保证金率</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">申购替代金额</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid #e5edf7;">赎回替代金额</th>
+            <th style="padding:8px; text-align:center; border-bottom:1px solid #e5edf7;">市场</th>
+            <th style="padding:8px; text-align:center; border-bottom:1px solid #e5edf7;">备注</th>
+          </tr>
+        </thead>
+        <tbody id="pcfBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- 历史记录弹窗（点「静态估值」列弹出；UI 完全对齐 LOF 套利程序 arbTest Dashboard） -->
+<div id="staticModal" class="hidden" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.5); z-index:100;">
+  <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:12px; width:96vw; max-width:1400px; height:90vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.3);">
+    <div style="padding:14px 20px; border-bottom:1px solid #e5edf7; display:flex; align-items:center; gap:12px; flex-shrink:0;">
+      <div style="font-weight:700; font-size:16px;" id="staticTitle">[历史记录]</div>
+      <button onclick="closeStatic()" style="margin-left:auto; padding:4px 14px; border:1px solid #e5edf7; border-radius:6px; cursor:pointer; background:#fff;">关闭</button>
+    </div>
+    <div style="padding:12px 20px 0; flex-shrink:0;">
+      <div id="histInfo" style="display:flex; flex-wrap:wrap; gap:18px; font-size:13px; color:#374151; margin-bottom:6px;"></div>
+      <div id="staticDesc" style="font-size:12px; color:#64748b; margin-bottom:8px;"></div>
+    </div>
+    <div style="flex:1; overflow:auto; padding:0 20px;">
+      <table style="width:100%; border-collapse:collapse; font-size:13px;" id="histTable">
+        <thead id="staticHead"></thead>
+        <tbody id="histBody"></tbody>
+      </table>
+    </div>
+    <div style="padding:10px 20px; border-top:1px solid #e5edf7; display:flex; align-items:center; gap:8px; flex-shrink:0; font-size:13px;">
+      <span id="histPageBar" style="display:flex; gap:4px; align-items:center;"></span>
+      <span id="histPageInfo" style="margin-left:auto; color:#64748b;"></span>
+      <select id="histSizeSel" onchange="histSetSize(this.value)" style="border:1px solid #e5edf7; border-radius:6px; padding:3px 6px;">
+        <option>10</option><option>15</option><option>20</option><option>30</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 跨境 ETF 看板（欧美 / 亚洲，仿集思录） ===== -->
+<div id="marketView" class="view">
+  <div class="mktwrap">
+    <div class="mktbar">
+      <span id="mktTitle">低风险投资</span>
+      <input type="text" id="mktSearch" placeholder="筛选 代码/名称/指数…"
+             oninput="mktFilter=this.value.trim().toLowerCase();renderMarket();">
+      <label><input type="checkbox" id="chkEtf" checked
+             onchange="onTypeToggle();">显示ETF</label>
+      <label><input type="checkbox" id="chkLof" checked
+             onchange="onTypeToggle();">显示LOF</label>
+      <label><input type="checkbox" id="chkWatch"
+             onchange="mktOnlyWatch=this.checked;renderMarket();">仅看关注</label>
+      <label><input type="checkbox" id="mktCompact" checked
+             onchange="mktCompact=this.checked;renderMarket();">紧凑</label>
+      <label><input type="checkbox" id="mktOnlyOut"
+             onchange="mktOnlyOut=this.checked;renderMarket();">只看有IOPV</label>
+      <button class="btn" onclick="loadMarket(MV,1)">刷新</button>
+      <span class="sp" id="mktSp">—</span>
+    </div>
+    <div class="mktscroll">
+      <table class="mkt">
+        <thead><tr id="mktHead"></tr></thead>
+        <tbody id="mktBody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="mktEmpty">切换到跨境 ETF 标签后自动加载…</div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+var KINDS = ['全部', '国内宽基', '国内行业', '跨境QDII', '港股通'];   // 类型取后端 fund_iopv_config.kind
+var currentKind = '全部';
+var sortKey = 'premium_bps';
+var sortDesc = true;
+var lastData = [];
+var lastLogs = [];
+
+function fmt(v, p) {
+  if (v === null || v === undefined || isNaN(v)) return '—';
+  return Number(v).toFixed(p === undefined ? 2 : p);
+}
+function fmtBig(v) {
+  if (v === null || v === undefined || isNaN(v)) return '—';
+  return Number(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+function fmtWan(v) { return (v && !isNaN(v)) ? (v / 10000).toFixed(0) + '万份' : '-'; }
+function px(v) { return v > 0 ? 'up' : (v < 0 ? 'down' : 'flat'); }
+function sign(v) { return v > 0 ? '+' + fmt(v, 1) : fmt(v, 1); }
+function pct(v, d) {
+  if (v === null || v === undefined || isNaN(v)) return '—';
+  // 后端存 BP，转百分比显示
+  return (v > 0 ? '+' : '') + fmt(v / 100, d === undefined ? 2 : d) + '%';
+}
+// 成分停牌徽标（标的层面，2026-09-17 立）
+//   停牌券无成交价 ⇒ 交易所 IOPV 口径是「沿用停牌前收盘价」，我们照算、数字照常展示；
+//   但停牌期间该部分只能走现金替代，且申赎替代款要等**复牌后按实际交易成本**结算
+//   ⇒ 此刻的折溢价无法兑现，标出来提示不要参与（东哥：「凡是有停牌的 ETF 我都不去关心」）。
+function suspBadge(r) {
+  var codes = r.suspended_codes || [];
+  var tip;
+  if (codes.length) {
+    tip = '成分含 ' + codes.length + ' 只停牌券（' + codes.join('、') + '）' +
+      (r.suspended_weight != null ? '，占篮子货值 ' + (r.suspended_weight * 100).toFixed(2) + '%' : '') +
+      '。IOPV 按「停牌前收盘价」估值（交易所官方口径，见 docs/21 §二·F），故数字照常展示；' +
+      '但停牌期间这部分只能走现金替代，申赎替代款要等复牌后按实际交易成本结算 ⇒ 当前折溢价无法兑现。';
+  } else if (r.suspended_from_db) {
+    tip = (r.suspended_date ? '最近公告 ' + r.suspended_date + '：' : '') + r.suspended_from_db;
+  } else {
+    return '';
+  }
+  return '<span class="tag amber" style="margin-left:6px;" title="' +
+    String(tip).replace(/"/g, '') + '">停牌中 · 暂停参考</span>';
+}
+
+function statusBadge(s) {
+  if (s === 'OK') return '<span class="tag green">OK</span>';
+  if (s === 'WARN') return '<span class="tag amber">WARN</span>';
+  if (s === 'ERROR') return '<span class="tag red">ERROR</span>';
+  if (s === 'CLOSED') return '<span class="tag gray">休市</span>';
+  if (s === 'PENDING') return '<span class="tag gray">待校验</span>';
+  return '<span class="tag gray">-</span>';
+}
+
+// 旧「测试看板」按 kind 分类筛选已废弃：测试看板现复用 COL_BASE 全市场（与欧美/亚洲一致），
+// 分类由 TAB 层（欧美/亚洲/国内LOF/现金管理）承担。
+function renderTabs() {}
+
+var mainData = null;
+// 关注池看板（main）：只显示「喂过数据 / 分析过 / 有可能套利」的精选标的（DB watch_pool 表），
+//   而非全市场。后端 market=WATCH 单次返回（跨市场合并），前端复用 COL_BASE 渲染。
+function loadMainBoard(force) {
+  // 🔴 自选合并：把 localStorage 自选 code 列表用 codes= 传给后端，与关注池(WATCH)并集返回；
+  //    自选基金由服务端补齐完整行。未加自选时 codes 为空，行为与旧版一致。
+  var wc = (watchlist && watchlist.length) ? '&codes=' + encodeURIComponent(watchlist.join(',')) : '';
+  fetch('/api/etf_market?market=WATCH' + wc + (force ? '&force=1' : ''), { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (p) {
+      mainData = { rows: p.rows || [], count: p.count || (p.rows || []).length,
+                   ts: p.ts || '', stats: p.stats || {} };
+      renderMainBoard();
+    }).catch(function (e) {
+      var eb = document.getElementById('mainEmpty');
+      if (eb) { eb.style.display = 'block'; eb.textContent = '加载失败：' + e; }
+    });
+}
+// 测试看板渲染：与欧美/亚洲 100% 一致（同一 COL_BASE），代码列自带自选星标；
+// FX-中间价/买入结算汇兑 移入页头（mainFxBar），状态降级为 mktBadge 徽标（停牌中/未出数）。
+function renderMainBoard() {
+  if (!mainData) return;
+  // 关注池专属「标签」列（插在名称之后），并给单元格加备注 tooltip
+  var COL_WATCH_TAG = { k: 'watch_tag', t: '标签', l: 1, f: function (v, r) {
+      // 🔴 标签显示：服务端关注池标签优先；关注池没有、但被用户自选(localStorage)的，
+      //    实时显示为「自选」（每次渲染重算，点星/取消星立即反映，不依赖重新加载）。
+      var t = v || ((r.watched || isWatched(r.code)) ? '关注' : null);
+      if (!t) return '<span class="muted">—</span>';
+      var color = t === '重点' ? '#dc2626' : t === '观察' ? '#d97706'
+                : t === '现金' ? '#0891b2' : t === '已弃' ? '#94a3b8'
+                : t === '关注' ? '#f59e0b' : '#475569';
+      return '<span title="' + esc(r.watch_note || '') + '" style="color:' + color +
+             ';font-weight:600;cursor:help;">' + esc(t) + '</span>'; } };
+  var base = (mktCompact ? COL_BASE : COL_BASE.concat(COL_EXTRA));
+  var cols = base.slice(0, 2).concat([COL_WATCH_TAG], base.slice(2));
+  var head = document.getElementById('mainHead');
+  var body = document.getElementById('mainBody');
+  var empty = document.getElementById('mainEmpty');
+  var hh = '';
+  cols.forEach(function (c) {
+    var cls = (c.l ? 'l ' : '') + (c.cls || '');
+    var ar = (mktSort.key === c.k) ? (mktSort.desc ? '▼' : '▲') : '';
+    hh += '<th class="' + cls + '" data-k="' + c.k + '"' +
+          (c.ttl ? ' title="' + esc(c.ttl) + '"' : '') + '>' + c.t +
+          '<span class="ar">' + ar + '</span></th>';
+  });
+  head.innerHTML = hh;
+  Array.prototype.forEach.call(head.querySelectorAll('th[data-k]'), function (h) {
+    h.onclick = function () {
+      var k = h.getAttribute('data-k');
+      if (mktSort.key === k) { mktSort.desc = !mktSort.desc; }
+      else { mktSort.key = k; mktSort.desc = true; }
+      renderMainBoard();
+    };
+  });
+  var rows = (mainData.rows || []).filter(function (r) {
+    // 「我的关注」= 库关注(DB, r.watched) ∪ 浏览器自选(localStorage)；两者皆非立即隐藏
+    if (!(r.watched || isWatched(r.code))) return false;
+    if (mktOnlyWatch && !(r.watched || isWatched(r.code))) return false;
+    if (mktFilter) {
+      return ((r.code || '') + ' ' + (r.name || '') + ' ' + (r.index_nm || ''))
+        .toLowerCase().indexOf(mktFilter) >= 0;
+    }
+    return true;
+  });
+  rows.sort(function (a, b) { return cmpRows(cols, a, b); });
+  var html = '';
+  rows.forEach(function (r) {
+    html += '<tr>';
+    cols.forEach(function (c) {
+      var cls = (c.l ? 'l ' : '') + (c.cls || '');
+      var raw = r[c.k];
+      if (raw === null || raw === undefined) cls += ' null';
+      var tdx = '';                        // 列级可选「整格可点」（static_val：点任意位置看历史）
+      if (c.tdc) { var s = c.tdc(r); if (s) tdx = ' style="cursor:pointer;" onclick="' + s + '"'; }
+      html += '<td class="' + cls + '"' + tdx + '>' + (c.f ? c.f(raw, r) : esc(raw)) + '</td>';
+    });
+    html += '</tr>';
+  });
+  body.innerHTML = html;
+  empty.style.display = rows.length ? 'none' : 'block';
+  if (!rows.length) empty.textContent = '没有匹配的标的';
+  // 统计条
+  var st = mainData.stats || {};
+  var out = (st.perstock || 0) + (st.proxy || 0) + (st.lof || 0);
+  var sp = document.getElementById('mainSp');
+  if (sp) sp.textContent = '共 ' + (mainData.count || 0) + ' 只 · 出数 ' + out +
+    ' · 自算vs官方中位 ' + (st.err_bps_median === null || st.err_bps_median === undefined
+      ? '—' : (st.err_bps_median > 0 ? '+' : '') + Number(st.err_bps_median).toFixed(1) + 'bp') +
+    ' · 更新 ' + (mainData.ts || '');
+  var upm = document.getElementById('updated'); if (upm) upm.textContent = mainData.ts || '--';
+  var frm = document.getElementById('fresh'); if (frm) { frm.className = 'fresh ok'; frm.textContent = '实时'; }
+  // FX 页头条（HKD 口径，取任一有值行；同币种全市场通用，故只显示一处）
+  var fx = null;
+  (mainData.rows || []).forEach(function (r) {
+    if (fx === null && r.fx_mid != null && r.settle_fx != null) fx = r;
+  });
+  var fb = document.getElementById('mainFxBar');
+  if (fb) {
+    fb.innerHTML = fx ? ('汇率（HKD 口径）｜FX-中间价 <b>' + nf(fx.fx_mid, 4) +
+      '</b> · 买入结算汇兑 <b>' + nf(fx.settle_fx, 4) + '</b>' +
+      (fx.settle_date ? ' <span style="color:#94a3b8;">@' + esc(fx.settle_date) + '</span>' : '') +
+      '　·　FX-中间价/买入结算汇兑已移至页头（同币种全市场通用，不再逐行重复）')
+      : '汇率数据待接入（非交易时段）';
+  }
+}
+
+function renderLogs() {
+  var box = document.getElementById('logbox');
+  if (!box) return;                       // 日志卡片已删除（2026-09-27 东哥拍板）
+  if (!lastLogs || !lastLogs.length) {
+    box.innerHTML = '<div class="logline INFO"><span class="lt">--:--:--</span>暂无日志（等待后端生成快照）</div>';
+    return;
+  }
+  var html = '';
+  lastLogs.forEach(function (L) {
+    var lv = (L.level || 'INFO').toUpperCase();
+    html += '<div class="logline ' + lv + '"><span class="lt">' + (L.t || '') + '</span>[' + lv + '] ' + (L.msg || '') + '</div>';
+  });
+  box.innerHTML = html;
+  box.scrollTop = box.scrollHeight;
+}
+
+function refresh() {
+  if (currentView === 'main') { loadMainBoard(); }
+}
+
+// ============ 历史明细弹窗（测试看板行点击） ============
+function showHistory(code) {
+  var r = lastData.find(function (x) { return x.code === code; });
+  document.getElementById('historyTitle').textContent = code + ' ' + (r ? (r.name || '') : '') + ' 历史记录';
+  document.getElementById('historySub').textContent = '按交易日降序 · 校准 + 收盘口径';
+  var head = document.getElementById('histHead');
+  head.innerHTML = '<span class="hi">最小申赎单位<span class="hv">' + (r ? fmtWan(r.report_unit) : '-') + '</span></span>' +
+    '<span class="hi">当日累计申购上限<span class="hv">' + (r && r.create_limit ? (r.create_limit/1e6).toFixed(0)+'百万份' : '—') + '</span></span>' +
+    '<span class="hi">当日累计赎回上限<span class="hv">' + (r && r.redeem_limit ? (r.redeem_limit/1e6).toFixed(0)+'百万份' : '—') + '</span></span>' +
+    '<span class="hi">买入结算汇兑<span class="hv">' + (r && r.settlement_fx != null ? fmt(r.settlement_fx,5)+(r.settlement_fx_date?' @'+r.settlement_fx_date:'') : '待接入') + '</span></span>' +
+    (r ? suspBadge(r) : '') +
+    '<a href="javascript:void(0)" class="btn" onclick="showPcf(\'' + code + '\')">PCF明细 ↗</a>';
+  var body = document.getElementById('historyBody');
+  body.innerHTML = '<tr><td colspan="15" style="text-align:center; padding:20px; color:#94a3b8;">加载中...</td></tr>';
+  document.getElementById('historyModal').classList.remove('hidden');
+
+  fetch('/api/iopv/detail/' + code, { cache: 'no-store' })
+    .then(function (resp) { return resp.json(); })
+    .then(function (d) {
+      if (!d.rows || !d.rows.length) {
+        body.innerHTML = '<tr><td colspan="15" style="text-align:center; padding:20px; color:#94a3b8;">该标的暂无 IOPV 校准历史（需先有 PCF + verify 记录）</td></tr>';
+        return;
+      }
+      body.innerHTML = '';
+      d.rows.forEach(function (row) {
+        var tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid #f1f5f9';
+        tr.innerHTML =
+          '<td style="padding:8px; text-align:left;">' + (row.date || '-') + '</td>' +
+          '<td style="padding:8px; text-align:right;">' + fmt(row.etf_price, 4) + '</td>' +
+          '<td style="padding:8px; text-align:right;' + (row.iopv_status === 'WARN' ? ' color:#d97706;' : '') + '" title="' + String((row.iopv != null ? ('收盘时点 IOPV = ( ' + fmtBig(row.iopv_basket) + ' (D公告成分×D日收盘×D日中间价) + 预估现金 ) ÷ 申赎单位') : '该日公告成分或港股收盘价缺失，未计算') + (row.iopv_note ? ' ｜ ' + row.iopv_note : '')).replace(/"/g, '') + '">' + fmt(row.iopv, 4) + '</td>' +
+          '<td style="padding:8px; text-align:right; color:' + (row.premium_bps > 0 ? '#f44336' : (row.premium_bps < 0 ? '#4caf50' : '#888')) + ';">' + (row.premium_bps != null ? pct(row.premium_bps) : '-') + '</td>' +
+          '<td style="padding:8px; text-align:right;">' + fmt(row.nav_est, 4) + '</td>' +
+          '<td style="padding:8px; text-align:right;">' + (row.cash_diff != null ? fmt(row.cash_diff, 2) + (row.pcf_trade_date ? '<br><span style="font-size:10px;color:#94a3b8;">公告' + row.pcf_trade_date + '</span>' : '') : '-') + '</td>' +
+          '<td style="padding:8px; text-align:right;">' + (row.est_cash != null ? fmt(row.est_cash, 2) + (row.est_cash_date ? '<br><span style="font-size:10px;color:#94a3b8;">公告' + row.est_cash_date + '</span>' : '') : '-') + '</td>' +
+          '<td style="padding:8px; text-align:right; color:' + (row.actual_premium_settle_bps > 0 ? '#f44336' : (row.actual_premium_settle_bps < 0 ? '#4caf50' : '#888')) + ';">' + (row.actual_premium_settle_bps != null ? pct(row.actual_premium_settle_bps) : '待接入') + '</td>' +
+          '<td style="padding:8px; text-align:right;">' + fmt(row.fx, 5) + '</td>' +
+          '<td style="padding:8px; text-align:right; color:#64748b;">' + (row.settlement_fx != null ? fmt(row.settlement_fx, 5) : '待接入') + '</td>' +
+          '<td style="padding:8px; text-align:right;">' + (row.computed_basket != null ? fmtBig(row.computed_basket) : '<span style="color:#94a3b8;">未校验</span>') + '</td>' +
+          '<td style="padding:8px; text-align:right;">' + (row.official_basket != null ? fmtBig(row.official_basket) : '<span style="color:#94a3b8;">未校验</span>') + '</td>' +
+          '<td style="padding:8px; text-align:right;">' + (row.unit_nav != null ? fmtBig(row.unit_nav) : '<span style="color:#94a3b8;">待公布</span>') + '</td>' +
+          '<td style="padding:8px; text-align:right; color:' + (row.error_bps != null ? (Math.abs(row.error_bps) > 5 ? '#dc2626' : '#16a34a') : '#94a3b8') + ';" title="' + String(row.verify_note || '').replace(/"/g, '') + '">' + (row.error_bps != null ? pct(row.error_bps, 4) : '未校验') + '</td>' +
+          '<td style="padding:8px; text-align:center;">' + statusBadge(row.status) + '</td>';
+        body.appendChild(tr);
+      });
+    })
+    .catch(function (e) {
+      body.innerHTML = '<tr><td colspan="15" style="text-align:center; padding:20px; color:#dc2626;">获取历史失败: ' + e.message + '</td></tr>';
+    });
+}
+function closeHistory() { document.getElementById('historyModal').classList.add('hidden'); }
+document.getElementById('historyModal').addEventListener('click', function (e) { if (e.target === this) closeHistory(); });
+
+// ============ PCF 成分明细弹窗 ============
+function showPcf(code) {
+  fetch('/api/pcf/' + code, { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.error || !d.components || !d.components.length) {
+        alert('暂无 PCF 明细：' + (d.error || '无成分'));
+        return;
+      }
+      var r = lastData.find(function (x) { return x.code === code; });
+      document.getElementById('pcfTitle').textContent = code + ' ' + (r ? (r.name || '') : '') + ' PCF 成分明细';
+      var src = d.snapshot.source || '';
+      var srcHtml = /^https?:/i.test(src)
+        ? ' ｜ <a href="' + src + '" target="_blank" style="color:#2563eb; text-decoration:none;">源文件↗</a>'
+        : (src ? ' ｜ 来源 ' + src : '');
+      document.getElementById('pcfSub').innerHTML = d.snapshot
+        ? ('公告 ' + (d.components_trade_date || d.snapshot.trade_date) + ' ｜ 成分 ' + d.components.length + ' 只' +
+           ' ｜ 单位净值 ' + fmt(d.snapshot.unit_nav, 4) +
+           ' ｜ 现金差额 ' + fmt(d.snapshot.cash_diff, 2) + ' ｜ 预估现金 ' + fmt(d.snapshot.est_cash_part, 2) +
+           (d.fallback ? ' ｜ <span style="color:#dc2626;">最新公告 ' + d.latest_trade_date + ' 成分尚未落库，已回退展示</span>' : '') +
+           srcHtml)
+        : '';
+      var body = document.getElementById('pcfBody');
+      body.innerHTML = '';
+      var flagText = {0: '禁止', 1: '允许', 2: '必须', 3: '必须退补'};
+      d.components.forEach(function (c) {
+        var tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid #f1f5f9';
+        var memo = [];
+        if (c.is_virtual) memo.push('虚拟现金');
+        if (c.is_cross_market && !c.is_virtual) memo.push('跨市场');
+        // 🔴 「必须现金替代」成分：数量=0、货值在 cash_value（深市『申购替代金额』列）。
+        //    它**属于篮子货值**，会被计入 IOPV —— 标出来，免得看到「数量 0」以为它不参与。
+        if (c.cash_value > 0) memo.push('必须现金替代·货值计入篮子');
+        var sharesCell = (c.cash_value > 0)
+          ? '<span class="tag sm">现金替代</span>'
+          : (c.shares != null ? c.shares : '-');
+        var buyCell = (c.subst_amount != null)
+          ? c.subst_amount.toFixed(2)
+          : (c.cash_value != null ? c.cash_value.toFixed(2) : '-');
+        tr.innerHTML =
+          '<td style="padding:8px; text-align:left; font-family:Consolas,monospace; color:#2563eb;">' + (c.stock_code || '-') + '</td>' +
+          '<td style="padding:8px; text-align:left;">' + (c.name || '-') + '</td>' +
+          '<td style="padding:8px; text-align:right;">' + sharesCell + '</td>' +
+          '<td style="padding:8px; text-align:center;">' + (flagText[c.cash_sub_flag] || c.cash_sub_flag || '-') + '</td>' +
+          '<td style="padding:8px; text-align:right;">' + (c.premium_ratio != null ? (c.premium_ratio * 100).toFixed(2) + '%' : '-') + '</td>' +
+          '<td style="padding:8px; text-align:right;">' + buyCell + '</td>' +
+          '<td style="padding:8px; text-align:right;">' + (c.redemption_subst_amount != null ? c.redemption_subst_amount.toFixed(2) : '-') + '</td>' +
+          '<td style="padding:8px; text-align:center;">' + (c.market || '-') + '</td>' +
+          '<td style="padding:8px; text-align:center; color:#64748b;">' + (memo.join(' / ') || '-') + '</td>';
+        body.appendChild(tr);
+      });
+      document.getElementById('pcfModal').classList.remove('hidden');
+    })
+    .catch(function (e) { alert('获取 PCF 失败: ' + e.message); });
+}
+function closePcf() { document.getElementById('pcfModal').classList.add('hidden'); }
+document.getElementById('pcfModal').addEventListener('click', function (e) { if (e.target === this) closePcf(); });
+
+// ============ 历史记录弹窗（点「静态估值」列弹出；列/配色/分页对齐 LOF 套利程序） ============
+var HIST = { code: null, name: '', kind: '', rows: [], page: 1, size: 10, profile: {} };
+function hpc(v) {                       // 涨红跌绿（对齐 arbTest priceColor）
+  if (v === null || v === undefined || isNaN(v)) return '#999';
+  return v > 0 ? '#dc2626' : (v < 0 ? '#16a34a' : '#374151');
+}
+function hNum(v, d) { return (v === null || v === undefined || isNaN(v)) ? null : Number(v).toFixed(d === undefined ? 4 : d); }
+function hValChg(val, chg, d) {         // arbTest renderValWithChg：主值 + 右侧小字涨跌
+  var s = hNum(val, d);
+  if (s === null) return '<span style="color:#999;">-</span>';
+  if (chg === null || chg === undefined || isNaN(chg) || chg === 0)
+    return '<span style="font-weight:500;">' + s + '</span>';
+  var c = chg > 0 ? '#dc2626' : '#16a34a';
+  return '<span style="font-weight:500;">' + s + '</span>' +
+    '<span style="color:' + c + '; font-size:11px; margin-left:3px;">' + (chg > 0 ? '+' : '') + chg.toFixed(2) + '%</span>';
+}
+function hWeekendLabel(dateStr, code) { // arbTest：511360 标周一、其余标周五（现金管理专属）
+  try {
+    var day = new Date(dateStr).getDay();
+    if (code === '511360' && day === 1) return ' 周一';
+    if (code !== '511360' && day === 5) return ' 周五';
+  } catch (e) {}
+  return '';
+}
+function showStaticVal(code, name) {
+  HIST = { code: code, name: name || '', kind: '', rows: [], page: 1, size: Number(document.getElementById('histSizeSel').value) || 10, profile: {} };
+  document.getElementById('staticTitle').textContent = '[历史记录] ' + code + (name ? ' - ' + name : '');
+  document.getElementById('histInfo').innerHTML = '';
+  document.getElementById('staticDesc').textContent = '';
+  document.getElementById('staticHead').innerHTML = '';
+  document.getElementById('histBody').innerHTML = '<tr><td colspan="12" style="padding:16px; color:#94a3b8;">加载中…</td></tr>';
+  document.getElementById('staticModal').classList.remove('hidden');
+  histFetch();
+}
+function histFetch() {
+  fetch('/api/staticval/history/' + HIST.code)
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.error) { document.getElementById('histBody').innerHTML = '<tr><td colspan="12" style="padding:16px; color:#ef4444;">' + esc(d.error) + '</td></tr>'; return; }
+      HIST.kind = d.kind || 'lof'; HIST.rows = d.rows || []; HIST.profile = d.profile || {};
+      HIST.page = 1;
+      if (d.name) HIST.name = d.name;   // 接口有名称就补上（原先要求本地已有名，导致只传 code 时标题永远无名）
+      document.getElementById('staticTitle').textContent = '[历史记录] ' + HIST.code + (HIST.name ? ' - ' + HIST.name : '');
+      renderHistInfo();
+      renderHist();
+    })
+    .catch(function () {
+      document.getElementById('histBody').innerHTML = '<tr><td colspan="12" style="padding:16px; color:#ef4444;">加载失败</td></tr>';
+    });
+}
+function renderHistInfo() {
+  var p = HIST.profile, h = '';
+  if (HIST.kind === 'lof') {
+    h += '<div><strong>仓位：</strong> -</div>';
+    h += '<div><strong>跟踪标的：</strong> ' + esc(p.index_nm || '-') + '</div>';
+    h += '<div><strong>申购费率：</strong> ' + esc(p.sub_fee || '-') + '</div>';
+    h += '<div><strong>赎回费率：</strong> ' + esc(p.redeem_fee || '-') + '</div>';
+  } else {
+    h += '<div><strong>类型：</strong> 现金管理（债券/货币型，无汇率与指数权重口径）</div>';
+  }
+  document.getElementById('histInfo').innerHTML = h;
+}
+function histSetSize(v) { HIST.size = Number(v) || 10; HIST.page = 1; renderHist(); }
+function histCell(v) {                  // 无值显 -（灰色）
+  return (v === null || v === undefined || v === '' || isNaN(v))
+    ? '<span style="color:#999;">-</span>' : v;
+}
+function renderHist() {
+  var isCash = (HIST.kind === 'cash');
+  var code = HIST.code;
+  // ── 列定义（对齐 arbTest historyColumns：现金/LOF 两套）──
+  var cols = [{ t: '日期', k: 'date', w: 92, al: 'center', f: function (r) {
+      var d = (r.date || '').slice(5).replace('-', '-');
+      var lab = isCash ? hWeekendLabel(r.date, code) : '';
+      if (lab) return '<span style="color:#d97706; font-weight:600;">' + d + lab + '</span>';
+      return d; } }];
+  cols.push({ t: '净值', k: 'nav', w: 100, al: 'center', f: function (r) { return hValChg(r.nav, r.nav_chg); } });
+  if (isCash) {                          // 现金管理：净值后插「每日增加」（nav 差，正绿负红）
+    cols.push({ t: '每日增加', k: 'daily_inc', w: 84, al: 'center', f: function (r) {
+      var inc = r.daily_inc;
+      if (inc === null || inc === undefined) return '-';
+      var c = inc >= 0 ? '#16a34a' : '#dc2626';
+      return '<span style="color:' + c + ';">' + (inc >= 0 ? '+' : '') + inc.toFixed(4) + '</span>'; } });
+  }
+  cols.push({ t: '收盘价', k: 'price', w: 100, al: 'center', f: function (r) { return hValChg(r.price, r.price_chg, 3); } });
+  if (isCash) {
+    cols.push({ t: '折价几根毛', k: 'yield_per_wan', w: 92, al: 'center', f: function (r) {
+      if (r.yield_per_wan === null || r.yield_per_wan === undefined || r.yield_per_wan === 0) return '-';
+      var v = r.yield_per_wan;
+      return '<span style="color:' + hpc(v) + '; font-weight:500;">' + v.toFixed(2) + '</span>'; } });
+    cols.push({ t: '溢价', k: 'premium_pct', w: 90, al: 'center', f: function (r) {
+      if (r.premium_pct === null || r.premium_pct === undefined) return '-';
+      var v = r.premium_pct;
+      return '<span style="color:' + hpc(v) + '; font-weight:500;">' + v.toFixed(3) + '%</span>'; } });
+    if (code === '511360') {             // 511360 专属：国债指数 + 涨幅
+      cols.push({ t: '指数', k: 'idx_close', w: 82, al: 'center', f: function (r) { return hNum(r.idx_close, 2) === null ? '-' : '<span>' + hNum(r.idx_close, 2) + '</span>'; } });
+      cols.push({ t: '指数涨幅', k: 'idx_pct', w: 82, al: 'center', f: function (r) {
+        if (r.idx_pct === null || r.idx_pct === undefined) return '-';
+        return '<span style="color:' + hpc(r.idx_pct) + '; font-weight:500;">' + r.idx_pct.toFixed(3) + '%</span>'; } });
+    }
+    if (code === '511520') {             // 511520 专属：国债期货 + 涨幅
+      cols.push({ t: '期货', k: 'futures_close', w: 82, al: 'center', f: function (r) { return hNum(r.futures_close, 3) === null ? '-' : '<span>' + hNum(r.futures_close, 3) + '</span>'; } });
+      cols.push({ t: '期货涨幅', k: 'futures_pct', w: 82, al: 'center', f: function (r) {
+        if (r.futures_pct === null || r.futures_pct === undefined) return '-';
+        return '<span style="color:' + hpc(r.futures_pct) + '; font-weight:500;">' + r.futures_pct.toFixed(3) + '%</span>'; } });
+    }
+  }
+  cols.push({ t: 'T-1 静态估值', k: 'static_val', w: 108, al: 'center', f: function (r) { return hValChg(r.static_val, r.static_chg); } });
+  cols.push({ t: '估值误差', k: 'val_error', w: 88, al: 'center', f: function (r) {
+    if (r.static_val === null || r.static_val === undefined || r.nav === null || r.nav === undefined)
+      return '<span style="color:#999;">-</span>';
+    var v = r.static_val - r.nav;
+    return '<span style="color:' + hpc(v) + '; font-weight:bold;">' + v.toFixed(4) + '</span>'; } });
+  cols.push({ t: '误差率', k: 'val_error_rate', w: 80, al: 'center', f: function (r) {
+    if (r.val_error_rate === null || r.val_error_rate === undefined || isNaN(r.val_error_rate)) return '-';
+    return '<span style="color:' + hpc(r.val_error_rate) + '; font-weight:500;">' + r.val_error_rate.toFixed(3) + '%</span>'; } });
+  if (!isCash) {
+    cols.push({ t: 'T-1 估值溢价', k: 'static_premium', w: 88, al: 'center', f: function (r) {
+      if (r.static_premium === null || r.static_premium === undefined) return '-';
+      return '<span style="color:' + hpc(r.static_premium) + ';">' + (r.static_premium > 0 ? '+' : '') + r.static_premium.toFixed(2) + '%</span>'; } });
+    // 驱动列：159687=「LCU 净值」（LCU 桥接）/ 沙特双雄=「02830 价」（港股驱动）
+    //   profile.driver_name 由后端 fund_history._driver_meta 下发；无驱动列时回落「指数价 / 指数涨幅」。
+    var _dn = HIST.profile && HIST.profile.driver_name;
+    if (_dn) {
+      var _du = HIST.profile.driver_unit || '';
+      var _dd = HIST.profile.driver_dec || 4;
+      cols.push({ t: (_dn + ' ' + _du).trim(), k: 'drv_close', w: 100, al: 'center',
+                  f: function (r) { return hValChg(r.drv_close, r.drv_pct, _dd); } });
+      cols.push({ t: _dn + '涨幅', k: 'drv_pct', w: 86, al: 'center', f: function (r) {
+        if (r.drv_pct === null || r.drv_pct === undefined) return '-';
+        return '<span style="color:' + hpc(r.drv_pct) + '; font-weight:500;">' + r.drv_pct.toFixed(2) + '%</span>'; } });
+    } else {
+      cols.push({ t: '指数价', k: 'index_close', w: 96, al: 'center', f: function (r) { return hValChg(r.index_close, r.index_close_chg, 2); } });
+      cols.push({ t: '指数涨幅', k: 'index_pct', w: 86, al: 'center', f: function (r) {
+        if (r.index_pct === null || r.index_pct === undefined) return '-';
+        return '<span style="color:' + hpc(r.index_pct) + '; font-weight:500;">' + r.index_pct.toFixed(2) + '%</span>'; } });
+    }
+    cols.push({ t: '份额(万)', k: 'shares', w: 86, al: 'center', f: function (r) { return histCell(hNum(r.shares, 0)); } });
+    cols.push({ t: '新增(万)', k: 'shares_added', w: 82, al: 'center', f: function (r) {
+      if (r.shares_added === null || r.shares_added === undefined || isNaN(r.shares_added)) return '-';
+      var n = Number(r.shares_added);
+      return '<span style="color:' + hpc(n) + '; font-size:11px;">' + (n >= 0 ? '+' : '') + n.toFixed(2) + '</span>'; } });
+  }
+  // ── 每日增加（前端算 nav 差，arbTest 同款）──
+  if (isCash) {
+    for (var i = 0; i < HIST.rows.length - 1; i++) {
+      var cur = HIST.rows[i], nxt = HIST.rows[i + 1];
+      cur.daily_inc = (cur.nav != null && nxt.nav != null) ? (cur.nav - nxt.nav) : null;
+    }
+    if (HIST.rows.length) HIST.rows[HIST.rows.length - 1].daily_inc = null;
+  }
+  // ── 渲染 ──
+  var th = '<tr style="background:#eef5ff;">';
+  cols.forEach(function (c) {
+    th += '<th style="padding:8px 6px; text-align:' + (c.al || 'right') + '; border-bottom:1px solid #e5edf7; font-size:12px; white-space:nowrap;">' + c.t + '</th>';
+  });
+  document.getElementById('staticHead').innerHTML = th + '</tr>';
+  var total = HIST.rows.length;
+  var start = (HIST.page - 1) * HIST.size;
+  var pageRows = HIST.rows.slice(start, start + HIST.size);
+  var html = '';
+  pageRows.forEach(function (r, ri) {
+    var bg = (ri % 2 === 1) ? 'background:#fbfdff;' : '';
+    html += '<tr style="' + bg + '">';
+    cols.forEach(function (c) {
+      html += '<td style="padding:7px 6px; text-align:' + (c.al || 'right') + '; border-bottom:1px solid #f1f5f9; white-space:nowrap;">' + c.f(r) + '</td>';
+    });
+    html += '</tr>';
+  });
+  document.getElementById('histBody').innerHTML = html ||
+    '<tr><td colspan="' + cols.length + '" style="padding:16px; color:#94a3b8;">暂无数据（净值/指数历史不足）</td></tr>';
+  // ── 分页条 ──
+  var pages = Math.max(1, Math.ceil(total / HIST.size));
+  var bar = '';
+  function pgBtn(p, txt) {
+    var on = (p === HIST.page);
+    return '<span onclick="histGo(' + p + ')" style="cursor:pointer; padding:2px 8px; border-radius:4px; ' +
+      (on ? 'background:#2563eb; color:#fff;' : 'color:#374151;') + '">' + (txt || p) + '</span>';
+  }
+  if (HIST.page > 1) bar += pgBtn(HIST.page - 1, '‹');
+  var s = Math.max(1, HIST.page - 3), e = Math.min(pages, s + 6); s = Math.max(1, e - 6);
+  for (var p2 = s; p2 <= e; p2++) bar += pgBtn(p2);
+  if (HIST.page < pages) bar += pgBtn(HIST.page + 1, '›');
+  document.getElementById('histPageBar').innerHTML = bar;
+  document.getElementById('histPageInfo').textContent = '共 ' + total + ' 条 · 每页 ' + HIST.size + ' 条';
+}
+function histGo(p) { HIST.page = p; renderHist(); }
+function closeStatic() { document.getElementById('staticModal').classList.add('hidden'); }
+document.getElementById('staticModal').addEventListener('click', function (e) { if (e.target === this) closeStatic(); });
+
+// ======================================================================
+// 跨境 ETF 看板（欧美 / 亚洲，仿集思录）—— 2026-09-17 立，docs/40
+//   数据全由后端 /api/etf_market 装配；前端只做「渲染 + 排序 + 筛选」。
+//   🔴 后端每行带 quote_path（逐券 / 指数代理），**本层不渲染**（内部区分用）。
+// ======================================================================
+var NAV_TABS = [
+  { k: 'main', t: '我的关注' },
+  { k: 'G', t: '黄金原油' },
+  { k: 'F', t: '商品期货' },   // 境内商品期货：161226 白银(AG0驱动)。159985 豆粕待 LOFarb 落实 M 期货驱动后接入；159981 能化已删
+  { k: 'E', t: '欧美' },
+  { k: 'A', t: '亚洲' },
+  { k: 'L', t: '国内LOF' },
+  { k: 'C', t: '现金管理' }
+];
+var currentView = 'main';     // 'main' | 'market'
+var MV = 'A';                 // 当前市场：A 亚洲 / E 欧美 / G 黄金原油 / F 商品期货 / L 境内LOF / C 现金管理
+var marketData = {};          // {A: payload, A|LOF: payload, ...}
+var mktSort = { key: 'amount_wan', desc: true };
+var mktCompact = true;
+var mktOnlyOut = false;
+var mktFilter = '';
+var mktType = '';             // ''=全部 / 'ETF' / 'LOF'（显示ETF / 显示LOF 复选框）
+var mktOnlyWatch = false;     // 仅看关注
+var watchlist = loadWatch();  // 自选（localStorage 持久化）
+var lastWatchSig = '';        // 上次载入「我的关注」时的自选签名（变化才重抓，避免点了星不刷新）
+
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+// 自选（localStorage 持久化）
+function loadWatch() {
+  try { return JSON.parse(localStorage.getItem('etfarb_watch') || '[]'); } catch (e) { return []; }
+}
+function saveWatch() {
+  try { localStorage.setItem('etfarb_watch', JSON.stringify(watchlist)); } catch (e) {}
+}
+function isWatched(code) { return watchlist.indexOf(code) >= 0; }
+function toggleWatch(code, watchedDb) {
+  var inBrowser = watchlist.indexOf(code) >= 0;
+  var shown = !!watchedDb || inBrowser;
+  if (shown) {
+    // 取消关注：浏览器自选 + 库内关注（若是 AI 喂的）一并清，与「自己点星」完全同权
+    if (inBrowser) { watchlist.splice(watchlist.indexOf(code), 1); saveWatch(); }
+    if (watchedDb) {
+      fetch('/api/watch/' + code, { method: 'DELETE' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (!j || !j.ok) console.warn('取消关注失败', code, j); })
+        .catch(function (e) { console.warn('取消关注请求异常', code, e); });
+    }
+  } else {
+    // 加关注：写入浏览器自选（不跨机同步）
+    watchlist.push(code); saveWatch();
+  }
+  // 立即在所有缓存视图里更新 watched 标志，保证点完立即灭星/亮星（不等 3s/30s 刷新）
+  setWatchedFlag(code, !shown);
+  // 取消/加关注后作废「我的关注」重抓签名：下次切回该页强制从服务器重拉，
+  // 杜绝 mainData 里残留的旧行（watched=true）与新数据矛盾（星星该灭不灭/该亮不亮）
+  lastWatchSig = '';
+  if (currentView === 'main') { if (mainData) loadMainBoard(); else renderMainBoard(); }
+  else renderMarket();
+}
+
+// 在所有缓存数据里设置某 code 的 watched 标志（即时反馈，解决「点了没反应」）
+function setWatchedFlag(code, val) {
+  if (mainData && mainData.rows) {
+    for (var _i = 0; _i < mainData.rows.length; _i++) {
+      if (mainData.rows[_i].code === code || mainData.rows[_i].fund_code === code) mainData.rows[_i].watched = val;
+    }
+  }
+  if (typeof marketData !== 'undefined' && marketData) {
+    for (var _k in marketData) {
+      if (marketData[_k] && marketData[_k].rows) {
+        for (var _j = 0; _j < marketData[_k].rows.length; _j++) {
+          if (marketData[_k].rows[_j].code === code || marketData[_k].rows[_j].fund_code === code) marketData[_k].rows[_j].watched = val;
+        }
+      }
+    }
+  }
+}
+function nf(v, d) {
+  if (v === null || v === undefined || v === '' || isNaN(v)) return '—';
+  return Number(v).toFixed(d === undefined ? 4 : d);
+}
+function pf(v, d) {                      // 百分比（已带正负号），**不是** 测试看板的 pct()（那个是 BP→%）
+  if (v === null || v === undefined || v === '' || isNaN(v)) return '—';
+  return (v > 0 ? '+' : '') + Number(v).toFixed(d === undefined ? 2 : d) + '%';
+}
+function intr(v) {
+  if (v === null || v === undefined || v === '' || isNaN(v)) return '—';
+  return Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 0 });
+}
+// 停牌 / 未出数 徽标（标的层面）
+function mktBadge(r) {
+  if (r.suspended_codes && r.suspended_codes.length)
+    return '<span class="tag amber sm" style="margin-left:5px;" title="' +
+      esc('成分含 ' + r.suspended_codes.length + ' 只停牌券（' + r.suspended_codes.join('、') + '）' +
+          (r.suspend_weight != null ? '，占篮子 ' + (r.suspend_weight * 100).toFixed(2) + '%' : '') +
+          ' ⇒ 折溢价当前无法兑现') + '">停牌中</span>';
+  if (r.iopv === null && r.err)
+    return '<span class="tag gray sm" style="margin-left:5px;" title="' + esc(r.err) + '">未出数</span>';
+  return '';
+}
+// woody 徽标：与 arbTest 重叠的基金，ETFarb 仅作指示（数据以 arbTest 为准）
+function woodyBadge(r) {
+  if (!r.woody) return '';
+  return '<span class="woody-badge" title="该基金已在 arbTest（woody 估值）覆盖，'
+    + 'ETFarb 不再计算自算 IOPV / 实时估值 / T-1 静态估值；估值与套利数据请以 arbTest 为准">'
+    + 'woody</span>';
+}
+// 折溢价单元格：数字 + 与官方 IOPV 的偏差放进 tooltip；偏差 > 20bp 标感叹号
+// 自算 IOPV 不可用时（成分含无实时盘口标的，如 159687 的 LCU 新加坡ETF）回退显示官方 IOPV 溢价（数字右上标「官」）。
+function premCell(r) {
+  var er = r.iopv_err_bps;
+  var selfPrem = (r.iopv_prem === null || r.iopv_prem === undefined) ? null : r.iopv_prem;
+  var offPrem = (r.official_iopv_prem === null || r.official_iopv_prem === undefined) ? null : r.official_iopv_prem;
+  var tip, usingOfficial = false;
+  if (selfPrem !== null) {
+    tip = '自算 IOPV';
+    if (r.iopv != null && r.official_iopv != null) {
+      tip = '自算 ' + nf(r.iopv) + ' vs 官方 ' + nf(r.official_iopv) +
+            '（偏差 ' + (er > 0 ? '+' : '') + Number(er).toFixed(1) + 'bp）';
+    }
+  } else if (offPrem !== null) {
+    usingOfficial = true;
+    tip = '自算 IOPV 不可用（成分含无实时盘口标的），显示官方 IOPV 溢价' +
+          (r.official_iopv != null ? '（官方 IOPV ' + nf(r.official_iopv) + '）' : '') +
+          (r.err ? '｜' + r.err : '');
+  } else {
+    tip = r.err || '无数据';
+  }
+  var body;
+  if (selfPrem !== null) {
+    body = '<span class="' + px(selfPrem) + '">' + pf(selfPrem) + '</span>';
+  } else if (offPrem !== null) {
+    body = '<span class="' + px(offPrem) + '">' + pf(offPrem) + '</span>' +
+           '<sup style="color:#64748b;font-size:9px;font-weight:600;">官</sup>';
+  } else {
+    body = '<span class="muted">—</span>';
+  }
+  var dot = (er != null && Math.abs(er) > 20)
+    ? '<span class="warn-dot" title="' + esc(tip) + '">!</span>' : '';
+  return '<span title="' + esc(tip) + '">' + body + dot + '</span>';
+}
+
+// ===== 「折溢价」这一列的排序取值（东哥 2026-10-08 拍板） =====
+//   背景：点该列表头本就走 renderMarket/renderMainBoard 的通用排序，但它按**原始字段**排，
+//   而显示值可能是「自算缺失 → 回退官方 IOPV 溢价」（premCell）。两者脱节 ⇒ 屏幕上显示
+//   +11.52% 的行（仅官方口径）被当成 null 沉到最底，排序结果与肉眼看到的数字对不上。
+//   故给该列声明 sv(r)：**按屏幕上显示的值排序**。
+function shownIopvPremBp(r) {          // IOPV溢价列（我的关注 / 欧美 / 亚洲，走 premCell）
+  var a = r.iopv_prem;                  // 自算优先（与 premCell 完全同口径）
+  var b = r.official_iopv_prem;         // 自算不可用 → 回退官方 IOPV 溢价
+  if (a !== null && a !== undefined) return a;
+  if (b !== null && b !== undefined) return b;
+  return null;                          // 两口径都无 ⇒ 无数据（恒沉底）
+}
+function shownRtPremBp(r) {             // 实时溢价列（黄金原油 / 国内LOF / 现金管理）
+  var v = r.iopv_prem;                  // 该列不显示官方回退，显示什么就排什么
+  return (v === null || v === undefined) ? null : v;
+}
+// 统一比较器：声明了 sv(r) 的列按 sv 取值，其余列沿用原始字段 r[k]（行为与改动前**完全一致**）。
+//   · sv 列的缺失值**恒沉底**（升/降都不翻到最顶）——无数据不该抢占榜首。
+//   · 非 sv 列保持原语义（含 null → -1e18 的旧行为），不动。
+function cmpRows(cols, a, b) {
+  var key = mktSort.key, col = null, i;
+  for (i = 0; i < cols.length; i++) { if (cols[i].k === key) { col = cols[i]; break; } }
+  var hasSv = !!(col && col.sv);
+  var va = hasSv ? col.sv(a) : a[key];
+  var vb = hasSv ? col.sv(b) : b[key];
+  var na = (va === null || va === undefined || va === '' || isNaN(va));
+  var nb = (vb === null || vb === undefined || vb === '' || isNaN(vb));
+  if (hasSv) {                          // 有数据的一律排在无数据之前
+    if (na && nb) return 0;
+    if (na) return 1;
+    if (nb) return -1;
+  }
+  if (typeof va === 'string' || typeof vb === 'string') {
+    va = va || ''; vb = vb || '';
+    return mktSort.desc ? (vb > va ? 1 : (vb < va ? -1 : 0)) : (va > vb ? 1 : (va < vb ? -1 : 0));
+  }
+  if (na) va = -1e18;
+  if (nb) vb = -1e18;
+  return mktSort.desc ? (vb - va) : (va - vb);
+}
+
+// 列定义：COL_BASE = 集思录同名列（+ 我们独有的「官方IOPV」对照列）
+var COL_BASE = [
+  { k: 'code', t: '代码', l: 1, cls: 's1', f: function (v, r) {
+      var on = !!(r.watched || isWatched(v));
+      var star = on
+        ? '<span style="color:#f59e0b;cursor:pointer;" title="取消关注" onclick="event.stopPropagation();toggleWatch(\'' + v + '\',' + (!!r.watched) + ');">★</span> '
+        : '<span style="color:#cbd5e1;cursor:pointer;" title="加关注" onclick="event.stopPropagation();toggleWatch(\'' + v + '\',' + (!!r.watched) + ');">☆</span> ';
+      return star + '<span class="code">' + esc(v || '') + '</span>'; } },
+  { k: 'name', t: '名称', l: 1, cls: 's2', f: function (v, r) { return esc(v || '') + mktBadge(r) + woodyBadge(r); } },
+  { k: 'price', t: '现价', f: function (v) { return nf(v, 3); } },
+  { k: 'chg_pct', t: '涨跌幅', f: function (v) { return '<span class="' + px(v) + '">' + pf(v) + '</span>'; } },
+  { k: 'amount_wan', t: '成交(万元)', ttl: '集思录口径为「当日累计成交额」。盘中是累计值，不是全天值。', f: function (v) { return intr(v); } },
+  { k: 'pre_share', t: '盘前份额', ttl: '前一交易日盘后份额（万份），来自东方财富 f84。存量规模口径。', f: function (v) { return intr(v); } },
+  { k: 'pre_new', t: '盘前新增', ttl: '相对上一记录日的新增份额（万份）。首日无历史时为空。', f: function (v) { return intr(v); } },
+  { k: 'turnover', t: '换手率', cls: 'turnover-cell', ttl: '成交量(手) ÷ 份额(万份)。与集思录/LOF套利程序同口径。', f: function (v, r) {
+      var t = (r.volume_lot && r.pre_share && r.pre_share > 0) ? r.volume_lot / r.pre_share : null;
+      return (t === null || isNaN(t)) ? '<span class="muted">—</span>' : pf(t); } },
+  { k: 'iopv', t: 'IOPV', ttl: '我们自算的实时 IOPV（逐券法用实时港股价×实时市场汇率；指数代理法用「篮子(D)×指数比×汇率比」）。', f: function (v) { return nf(v); } },
+  { k: 'iopv_prem', t: 'IOPV溢价', ttl: '(现价 − 自算IOPV) ÷ 自算IOPV。自算不可用时回退显示官方 IOPV 溢价（数字右上「官」标，如 159687 的 LCU 无实时盘口）。悬停看明细。\n🔴 点本列表头 = 按**屏幕上显示的数值**排序（自算优先、缺失按官方 IOPV 溢价排）；无数据的行恒排在最末。', sv: function (r) { return shownIopvPremBp(r); }, f: function (v, r) { return premCell(r); } },
+  { k: 'settle_prem', t: '实际折溢价<br>（T-1结算）', ttl: '(1 + 实时折溢价) × FX中间价 ÷ 买入结算汇兑(T-1) − 1。申购/赎回实际换汇按中登「买卖结算汇兑比率」成交（≠中间价），这才是盘中可锁定的套利口径；实时折溢价只是表观参考。🔴 结算汇兑中登只公布港股通 HKD ⇒ 美元/日元/欧元 QDII 显「—」。', f: function (v) { return (v === null || v === undefined) ? '<span class="muted">—</span>' : '<span class="' + px(v) + '">' + pf(v) + '</span>'; } },
+  { k: 'official_iopv', t: '官方IOPV', ttl: '腾讯实时口自带的**官方 IOPV**（免费真值源）。只作对照校验，不参与展示口径。', f: function (v) { return nf(v); } },
+  { k: 'pcf_url', t: 'PCF', ttl: '交易所发布的**最新**申购赎回清单（PCF）官方原文件，点击新窗口打开（内联阅读，不触发下载）。\n· 深市（158/159xxx）→ 深交所静态 CDN 宽表 txt（GBK），链接里带**最近可得交易日**；\n· 沪市（51/52/56/58xxxx）→ 上交所 XML。🔴 上交所上游响应头带 `Content-Disposition: attachment`，直链只会**另存文件**，故经本机 `/api/pcf/view` 剥掉下载头后内联转发。\n无公开官方源的标的（如深市/沪市 LOF）显「—」。', f: function (v) {
+      if (!v) return '<span class="muted">—</span>';
+      return '<a class="pcf-link" href="' + esc(v) + '" target="_blank" rel="noopener" title="' + esc(v) + '" onclick="event.stopPropagation();">PCF ↗</a>'; } },
+  { k: 'nav', t: '净值', ttl: '最新已公布净值（腾讯 jj[5]，与集思录同口径）。盘中当日净值尚未公布 ⇒ 显示上一交易日净值；盘后基金公司公布当日净值后自动前进一天。', f: function (v) { return nf(v); } },
+  { k: 'nav_date', t: '净值日', ttl: '净值所属日期（腾讯 jj[8]）。盘中 = 上一交易日；盘后公布当日净值后前进一天。', f: function (v) { return v || '—'; } },
+  { k: 'nav_prem', t: '净值溢价', ttl: '(现价 − 最新已公布净值) ÷ 最新已公布净值。当日净值未公布时是跨日口径：分子为实时价、分母为上一交易日净值。', f: function (v) { return '<span class="' + px(v) + '">' + pf(v) + '</span>'; } },
+  // T-1 静态估值两列（2026-10-08 东哥拍板：欧美/亚洲与 国内LOF/黄金原油 表头同构，
+  //   便于核对估值算法。列定义与 COL_LOF_BASE 完全同款；159687 走 LCU 桥接增强）。
+  { k: 'static_val', t: 'T-1 静态估值<br><span class="col-sub">点数字看历史</span>', cls: 'col-static-val', ttl: 'nav(D-1) × (1 + 0.95 × 指数D涨幅) —— 基金公司公布净值前对 Nav(D) 的预估（我们自算，官方发布的叫净值；159687 走 LCU 官方 NAV 桥接增强）。\n🔴 点**数据格任意位置**打开历史多天「T-1 静态估值 vs Nav」核对页；\n⚠️ 点**表头**是排序（升/降），不是看历史。', tdc: function (r) {
+      // td 级点击（整格可点）：woody 行 / 无值行不绑，避免点了没反应
+      if (r.woody) return '';
+      if (r.static_val === null || r.static_val === undefined) return '';
+      return 'event.stopPropagation();showStaticVal(\'' + r.code + '\',\'' + esc(r.name || '') + '\')'; }, f: function (v, r) {
+      var body = (v === null || v === undefined) ? '<span class="muted">—</span>' : nf(v);
+      if (r.woody) {
+        // woody 行 ETFarb 不出静态估值（数据以 arbTest 为准），仅显占位
+        return '<span class="muted" title="该基金已在 arbTest（woody）覆盖，静态估值请到 arbTest 查看">—</span>';
+      }
+      var tip = r.bond_method ? '债券口径：前一日净值 + 票息 + 方向项。' : 'nav(D-1) × (1 + 0.95 × 指数D涨幅)。';
+      var link = (v === null || v === undefined) ? body
+        : '<span class="col-static-link" title="' + tip + ' 点击查看历史核对页">' + body + '</span>';
+      return link; } },
+  { k: 'static_prem', t: 'T-1 估值溢价', ttl: '(现价 − T-1 静态估值) ÷ T-1 静态估值。', f: function (v) { return (v === null || v === undefined) ? '<span class="muted">—</span>' : '<span class="' + px(v) + '">' + pf(v) + '</span>'; } },
+  { k: 'idx_price', t: '指数价', ttl: '跟踪指数实时点位（与国内LOF同列，便于确认究竟跟踪哪个指数）。', f: function (v) { return (typeof v === 'string') ? '<span style="color:#e0533d;font-weight:600;">' + esc(v) + '</span>' : nf(v, 2); } },
+  { k: 'idx_chg', t: '指数涨幅', ttl: '跟踪指数的实时涨跌幅（指数代理法使用；逐券法为空）。', f: function (v) { return '<span class="' + px(v) + '">' + pf(v) + '</span>'; } },
+  { k: 'index_nm', t: '相关指数', l: 1, f: function (v) { return esc(v || '—'); } }
+];
+var COL_EXTRA = [
+  { k: 'sub_fee', t: '申购费', f: function (v) { return esc(v || '—'); } },
+  { k: 'sub_status', t: '申购状态', l: 1, f: function (v) { return esc(v || '—'); } },
+  { k: 'red_fee', t: '赎回费', f: function (v) { return esc(v || '—'); } },
+  { k: 'red_status', t: '赎回状态', l: 1, f: function (v) { return esc(v || '—'); } },
+  { k: 'mgmt_fee', t: '管理费', f: function (v) { return esc(v || '—'); } },
+  { k: 'company', t: '基金公司', l: 1, f: function (v) { return esc(v || '—'); } }
+];
+// LOF / 现金管理 列（2026-09-18 东哥拍板重排：集思录列序为底 + LOF套利程序增强列）
+//   JSL 底：现价/涨跌幅/成交/份额/新增/换手率/净值/净值日/净值涨幅/相关指数/申赎费率状态
+//   增强列：实时估值/实时溢价（JSL 无）、静态估值/静态溢价（点静态估值弹历史核对页）、指数价/指数涨幅
+var COL_LOF_BASE = [
+  { k: 'code', t: '代码', l: 1, cls: 's1', f: function (v, r) {
+      var on = !!(r.watched || isWatched(v));
+      var star = on
+        ? '<span style="color:#f59e0b;cursor:pointer;" title="取消关注" onclick="event.stopPropagation();toggleWatch(\'' + v + '\',' + (!!r.watched) + ');">★</span> '
+        : '<span style="color:#cbd5e1;cursor:pointer;" title="加关注" onclick="event.stopPropagation();toggleWatch(\'' + v + '\',' + (!!r.watched) + ');">☆</span> ';
+      return star + '<span class="code">' + esc(v || '') + '</span>'; } },
+  { k: 'name', t: '名称', l: 1, cls: 's2', f: function (v, r) { return esc(v || '') + mktBadge(r) + woodyBadge(r); } },
+  { k: 'price', t: '现价', f: function (v) { return nf(v, 3); } },
+  { k: 'chg_pct', t: '涨跌幅', f: function (v) { return '<span class="' + px(v) + '">' + pf(v) + '</span>'; } },
+  { k: 'amount_wan', t: '成交(万元)', f: function (v) { return intr(v); } },
+  { k: 'pre_share', t: '份额(万)', ttl: '前一交易日盘后份额（万份），东方财富 f84。', f: function (v) { return intr(v); } },
+  { k: 'pre_new', t: '新增(万)', ttl: '相对上一记录日的新增份额（万份）。', f: function (v) { return intr(v); } },
+  { k: 'turnover', t: '换手率', cls: 'turnover-cell', ttl: '成交量(手) ÷ 份额(万份)。与集思录/LOF套利程序同口径。', f: function (v, r) {
+      var t = (r.volume_lot && r.pre_share && r.pre_share > 0) ? r.volume_lot / r.pre_share : null;
+      return (t === null || isNaN(t)) ? '<span class="muted">—</span>' : pf(t); } },
+  { k: 'iopv', t: '实时估值', ttl: 'nav(D) × (1 + 0.95 × 指数实时涨幅)。仓位统一 95%（东哥 2026-09-18 拍板，arbTest unified_valuation 矩阵式单组件特例）。', f: function (v) { return nf(v); } },
+  { k: 'iopv_prem', t: '实时溢价', ttl: '(现价 − 实时估值) ÷ 实时估值。\n🔴 点本列表头 = 按本列数值排序（升/降切换）；无数据的行恒排在最末。', sv: function (r) { return shownRtPremBp(r); }, f: function (v) { return (v === null || v === undefined) ? '<span class="muted">—</span>' : '<span class="' + px(v) + '">' + pf(v) + '</span>'; } },
+  { k: 'nav', t: '基金净值', ttl: '最新已公布净值（腾讯 jj[5]，与集思录同口径）。', f: function (v) { return nf(v); } },
+  { k: 'nav_date', t: '净值日期', ttl: '净值所属日期（腾讯 jj[8]）。', f: function (v) { return v || '—'; } },
+  { k: 'nav_chg_pct', t: '净值涨幅', ttl: '最新已公布净值 ÷ 上一公布净值 − 1。', f: function (v) { return (v === null || v === undefined) ? '<span class="muted">—</span>' : '<span class="' + px(v) + '">' + pf(v) + '</span>'; } },
+  { k: 'static_val', t: 'T-1 静态估值<br><span class="col-sub">点数字看历史</span>', cls: 'col-static-val', ttl: 'nav(D-1) × (1 + 0.95 × 指数D涨幅) —— 基金公司公布净值前对 Nav(D) 的预估（我们自算，官方发布的叫净值）。\n🔴 点**数据格任意位置**打开历史多天「T-1 静态估值 vs Nav」核对页（含现金管理 4 只债券口径）；\n⚠️ 点**表头**是排序（升/降），不是看历史。', tdc: function (r) {
+      // td 级点击（整格可点）：woody 行 / 无值行不绑，避免点了没反应
+      if (r.woody) return '';
+      if (r.static_val === null || r.static_val === undefined) return '';
+      return 'event.stopPropagation();showStaticVal(\'' + r.code + '\',\'' + esc(r.name || '') + '\')'; }, f: function (v, r) {
+      var body = (v === null || v === undefined) ? '<span class="muted">—</span>' : nf(v);
+      if (r.woody) {
+        // woody 行 ETFarb 不出静态估值（数据以 arbTest 为准），仅显占位
+        return '<span class="muted" title="该基金已在 arbTest（woody）覆盖，静态估值请到 arbTest 查看">—</span>';
+      }
+      var tip = r.bond_method ? '债券口径：前一日净值 + 票息 + 方向项。' : 'nav(D-1) × (1 + 0.95 × 指数D涨幅)。';
+      var link = (v === null || v === undefined) ? body
+        : '<span class="col-static-link" title="' + tip + ' 点击查看历史核对页">' + body + '</span>';
+      return link; } },
+  { k: 'static_prem', t: 'T-1 估值溢价', ttl: '(现价 − T-1 静态估值) ÷ T-1 静态估值。', f: function (v) { return (v === null || v === undefined) ? '<span class="muted">—</span>' : '<span class="' + px(v) + '">' + pf(v) + '</span>'; } },
+  { k: 'idx_price', t: '指数价', ttl: '跟踪指数实时点位。', f: function (v) { return (typeof v === 'string') ? '<span style="color:#e0533d;font-weight:600;">' + esc(v) + '</span>' : nf(v, 2); } },
+  { k: 'idx_chg', t: '指数涨幅', ttl: '跟踪指数的实时涨跌幅（实时估值用）。', f: function (v) { return (v === null || v === undefined) ? '<span class="muted">—</span>' : '<span class="' + px(v) + '">' + pf(v) + '</span>'; } },
+  // （F 专属「驱动列」在 renderMarket 动态注入，见 F_DRIVER_COL；COL_LOF_BASE 内不放，
+  //   避免 L/C/G 市场误渲染）
+  { k: 'index_nm', t: '指数名称', l: 1, f: function (v) { return esc(v || '—'); } },
+  { k: 'sub_fee', t: '申购费率', f: function (v) { return esc(v || '—'); } },
+  { k: 'sub_status', t: '申购状态', l: 1, f: function (v) { return esc(v || '—'); } },
+  { k: 'red_fee', t: '赎回费率', f: function (v) { return esc(v || '—'); } },
+  { k: 'red_status', t: '赎回状态', l: 1, f: function (v) { return esc(v || '—'); } }
+];
+
+function renderNav() {
+  var el = document.getElementById('nav');
+  el.innerHTML = '';
+  NAV_TABS.forEach(function (t) {
+    var b = document.createElement('button');
+    var on = (t.k === 'main') ? (currentView === 'main') : (currentView === 'market' && MV === t.k);
+    b.className = on ? 'active' : '';
+    b.textContent = t.t;
+    b.onclick = function () { switchView(t.k); };
+    el.appendChild(b);
+  });
+}
+
+function switchView(k) {
+  currentView = (k === 'main') ? 'main' : 'market';
+  if (k !== 'main') MV = k;
+  if (MV !== 'A') mktType = '';   // 类型过滤（显示ETF/显示LOF）只对亚洲混合市场有效
+  document.getElementById('mainView').classList.toggle('active', currentView === 'main');
+  document.getElementById('marketView').classList.toggle('active', currentView === 'market');
+  document.getElementById('toolbar').style.display = 'none';  // 旧 KINDS 分类筛选已废弃（测试看板现复用 COL_BASE 全市场）
+  renderNav();
+  if (currentView === 'main') {
+    // 同步主看板专属复选框状态到全局
+    var cw = document.getElementById('mainCompact');
+    if (cw) cw.checked = mktCompact;
+    var ww = document.getElementById('mainWatch');
+    if (ww) ww.checked = mktOnlyWatch;
+    // 🔴 自选合并：切到「我的关注」时，若自选列表变了（点了星）或首次，重抓并集数据；
+    //    否则直接渲染已有 mainData（省一次请求）。签名变化即重抓，点了星立刻可见。
+    var sig = (watchlist || []).join(',');
+    if (sig !== lastWatchSig || !mainData) { lastWatchSig = sig; loadMainBoard(); }
+    else renderMainBoard();
+  } else {
+    var ttl = (MV === 'E') ? '欧美市场'
+            : (MV === 'A') ? '亚洲市场（ETF + QDII亚洲LOF 混合）'
+            : (MV === 'L') ? '国内 LOF'
+            : (MV === 'G') ? '黄金原油（商品LOF，数据以 arbTest 为准）'
+            : (MV === 'F') ? '商品期货（估值引用 LOFarb，161226 白银 AG0 驱动）'
+            : '现金管理';
+    document.getElementById('mktTitle').textContent = ttl;
+    syncTypeChecks();
+    var key = MV + '|' + (mktType || '');
+    if (marketData[key]) renderMarket(); else loadMarket(MV);
+  }
+}
+// 显示ETF / 显示LOF 复选框 → 决定 API 的 type 过滤并重新拉取
+function onTypeToggle() {
+  var e = document.getElementById('chkEtf').checked;
+  var l = document.getElementById('chkLof').checked;
+  mktType = (e && l) ? '' : (e ? 'ETF' : (l ? 'LOF' : 'NONE'));
+  loadMarket(MV, 1);
+}
+// 按当前市场同步复选框状态（亚洲混合市场才两个都有效；单类型页签只亮其一）
+function syncTypeChecks() {
+  var both = (MV === 'A');
+  document.getElementById('chkEtf').disabled = !both;
+  document.getElementById('chkLof').disabled = !both;
+  document.getElementById('chkEtf').checked = (mktType !== 'LOF');
+  document.getElementById('chkLof').checked = (mktType !== 'ETF');
+}
+
+function loadMarket(mkt, force) {
+  var sp = document.getElementById('mktSp');
+  sp.textContent = '加载中…';
+  var type = (mktType && mktType !== 'NONE') ? '&type=' + mktType : '';
+  var key = mkt + '|' + (mktType || '');
+  fetch('/api/etf_market?market=' + mkt + (force ? '&force=1' : '') + type, { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.error) { sp.textContent = '失败：' + d.error; return; }
+      marketData[key] = d;
+      if (currentView === 'market' && MV === mkt) renderMarket();
+    })
+    .catch(function (e) { sp.textContent = '连接失败：' + e.message; });
+}
+
+function renderMarket() {
+  var d = marketData[MV + '|' + (mktType || '')];
+  // 商品期货(F) 与 LOF 用同一套列（都含基金净值/静态估值/溢价等），故并入 isLof
+  var isLof = (MV === 'L' || MV === 'C' || MV === 'G' || MV === 'F');
+  // 商品期货(F) 专属「驱动列」：AG0 昨结算价（+ SI 交叉验证）。仅 F 市场注入。
+  var F_DRIVER_COL = { k: 'ag0_settlement', t: '驱动<br><span class="col-sub">AG0昨结算</span>', ttl: '上期所白银期货 AG0 上一交易日官方结算价（元/千克）。估值分母，由 LOFarb SSE 推流/新浪 nf_AG0 双源提供，ETFarb 引用不重算。盘中非交易时段实时价丢弃、昨结算价恒显示（东哥要求）。', cls: 'col-driver', f: function (v, r) {
+      if (v === null || v === undefined) return '<span class="muted">—</span>';
+      var si = r.si_val;
+      var siTxt = (si === null || si === undefined) ? '' : (' / SI ' + nf(si, 4));
+      return nf(v, 1) + '<span class="col-driver-sub">' + siTxt + '</span>';
+  } };
+  var cols = (mktCompact ? (isLof ? COL_LOF_BASE : COL_BASE)
+                         : (isLof ? COL_LOF_BASE.concat(COL_EXTRA) : COL_BASE.concat(COL_EXTRA)));
+  // 东哥 2026-10-08：黄金原油删「净值涨幅」列（没啥用）。国内LOF/现金管理保留。
+  if (MV === 'G') cols = cols.filter(function (c) { return c.k !== 'nav_chg_pct'; });
+  // 商品期货(F)：在「指数涨幅」列后插入驱动列。
+  if (MV === 'F') {
+    var _idx = -1;
+    for (var _ci = 0; _ci < cols.length; _ci++) if (cols[_ci].k === 'idx_chg') { _idx = _ci; break; }
+    cols.splice(_idx >= 0 ? _idx + 1 : cols.length, 0, F_DRIVER_COL);
+  }
+  // 名称统一（东哥 10-05 拍板）：基金公司发布的叫净值——QDII欧美=T-2 净值、亚洲(日本/港股通)=T-1 净值；
+  //   我们自算的叫「T-1 静态估值」。主看板(全市场混合)与国内LOF/现金管理不带前缀。
+  if (!isLof) {
+    var _navT = (MV === 'E') ? 'T-2 净值' : 'T-1 净值';
+    for (var _i = 0; _i < cols.length; _i++) if (cols[_i].k === 'nav') cols[_i].t = _navT;
+  }
+  var head = document.getElementById('mktHead');
+  var body = document.getElementById('mktBody');
+  var empty = document.getElementById('mktEmpty');
+
+  var hh = '';
+  cols.forEach(function (c) {
+    var cls = (c.l ? 'l ' : '') + (c.cls || '');
+    var ar = (mktSort.key === c.k) ? (mktSort.desc ? '▼' : '▲') : '';
+    hh += '<th class="' + cls + '" data-k="' + c.k + '"' +
+          (c.ttl ? ' title="' + esc(c.ttl) + '"' : '') + '>' + c.t +
+          '<span class="ar">' + ar + '</span></th>';
+  });
+  head.innerHTML = hh;
+  Array.prototype.forEach.call(head.querySelectorAll('th[data-k]'), function (h) {
+    h.onclick = function () {
+      var k = h.getAttribute('data-k');
+      if (mktSort.key === k) { mktSort.desc = !mktSort.desc; }
+      else { mktSort.key = k; mktSort.desc = true; }
+      renderMarket();
+    };
+  });
+
+  var sp = document.getElementById('mktSp');
+  if (!d) {
+    body.innerHTML = '<tr><td colspan="' + cols.length +
+      '" style="text-align:center;padding:26px;color:#94a3b8;">加载中…</td></tr>';
+    empty.style.display = 'none';
+    return;
+  }
+  var rows = (d.rows || []).filter(function (r) {
+    if (mktOnlyWatch && !(r.watched || isWatched(r.code))) return false;
+    if (mktOnlyOut && r.iopv === null) return false;
+    if (!mktFilter) return true;
+    return ((r.code || '') + ' ' + (r.name || '') + ' ' + (r.index_nm || ''))
+      .toLowerCase().indexOf(mktFilter) >= 0;
+  });
+  rows.sort(function (a, b) { return cmpRows(cols, a, b); });
+
+  var html = '';
+  rows.forEach(function (r) {
+    html += '<tr>';
+    cols.forEach(function (c) {
+      var cls = (c.l ? 'l ' : '') + (c.cls || '');
+      var raw = r[c.k];
+      if (raw === null || raw === undefined) cls += ' null';
+      var tdx = '';                        // 列级可选「整格可点」（static_val：点任意位置看历史）
+      if (c.tdc) { var s = c.tdc(r); if (s) tdx = ' style="cursor:pointer;" onclick="' + s + '"'; }
+      html += '<td class="' + cls + '"' + tdx + '>' + (c.f ? c.f(raw, r) : esc(raw)) + '</td>';
+    });
+    html += '</tr>';
+  });
+  body.innerHTML = html;
+  empty.style.display = rows.length ? 'none' : 'block';
+  if (!rows.length) empty.textContent = '没有匹配的标的';
+
+  var st = d.stats || {};
+  var out = (st.perstock || 0) + (st.proxy || 0) + (st.lof || 0);
+  sp.textContent = '共 ' + (d.count || 0) + ' 只 · 出数 ' + out +
+    ' · 未出 ' + ((st.no_source || 0) + (st.frozen || 0) + (st.err || 0) + (st.lof_missing || 0)) +
+    ' · 自算vs官方中位 ' +
+    (st.err_bps_median === null || st.err_bps_median === undefined
+      ? '—' : (st.err_bps_median > 0 ? '+' : '') + Number(st.err_bps_median).toFixed(1) + 'bp') +
+    ' · 更新 ' + (d.ts || '');
+}
+
+document.querySelectorAll('th[data-k]').forEach(function (th) {
+  th.onclick = function () {
+    var k = th.getAttribute('data-k');
+    if (sortKey === k) { sortDesc = !sortDesc; } else { sortKey = k; sortDesc = true; }
+    renderMarket();
+  };
+});
+
+renderTabs();
+renderNav();
+refresh();
+setInterval(function () {
+  if (currentView === 'main') { refresh(); }
+}, 3000);
+// 跨境看板：30 秒自动刷新（后端同口径 30 秒缓存，见 docs/40 §4.4）
+setInterval(function () {
+  if (currentView === 'market') { loadMarket(MV); }
+}, 30000);
+</script>
+</body>
+</html>

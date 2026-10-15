@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>期权持仓体检器</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ink:#111827; --mut:#6b7280;
+    --red:#dc2626; --green:#16a34a; --blue:#2563eb; --amber:#d97706;
+    --shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;}
+  .wrap{max-width:1180px;margin:0 auto;padding:20px 16px 60px;}
+  h1{font-size:20px;margin:0 0 4px;font-weight:650;}
+  .sub{color:var(--mut);font-size:13px;margin-bottom:18px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+        padding:16px 18px;margin-bottom:14px;box-shadow:var(--shadow);}
+  .card h2{font-size:14px;margin:0 0 12px;font-weight:650;display:flex;
+           align-items:center;gap:8px;}
+  .badge{font-size:11px;font-weight:500;padding:2px 7px;border-radius:20px;
+         background:#eef2ff;color:#4338ca;}
+  .badge.warn{background:#fef3c7;color:#92400e;}
+  .badge.ok{background:#dcfce7;color:#166534;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  .fld{display:flex;flex-direction:column;gap:4px;}
+  .fld label{font-size:12px;color:var(--mut);}
+  select,input{font:inherit;padding:7px 9px;border:1px solid var(--line);
+        border-radius:7px;background:#fff;color:var(--ink);outline:none;}
+  select:focus,input:focus{border-color:#93c5fd;box-shadow:0 0 0 3px #dbeafe;}
+  input[type=number]{width:100px;}
+  button{font:inherit;padding:8px 16px;border:none;border-radius:7px;
+         background:var(--blue);color:#fff;cursor:pointer;font-weight:500;}
+  button:hover{background:#1d4ed8;}
+  button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line);}
+  button.ghost:hover{background:#f9fafb;}
+  button.danger{background:#fff;color:var(--red);border:1px solid #fecaca;}
+  button.danger:hover{background:#fef2f2;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:right;padding:7px 8px;border-bottom:1px solid var(--line);}
+  th{color:var(--mut);font-weight:500;font-size:12px;text-align:right;}
+  th:first-child,td:first-child{text-align:left;}
+  tr.loss td{background:#fef2f2;}
+  tr.gain td{background:#f0fdf4;}
+  tr.zeroline td{border-top:2px solid #cbd5e1;font-weight:650;}
+  .big{font-size:26px;font-weight:700;letter-spacing:-.5px;}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;}
+  .kpi{background:#f9fafb;border:1px solid var(--line);border-radius:9px;padding:12px 14px;}
+  .kpi .lab{font-size:12px;color:var(--mut);margin-bottom:5px;}
+  .kpi .val{font-size:20px;font-weight:650;}
+  .pos{color:var(--red);}   /* 中国习惯：涨/正 = 红 */
+  .neg{color:var(--green);}
+  .hint{font-size:12px;color:var(--mut);margin-top:8px;line-height:1.7;}
+  /* ---- 名义价值提醒条（2026-09-29 加）---- */
+  .nominal{margin-top:10px;padding:11px 14px;border:1px solid #dbe3f0;border-radius:10px;
+           background:#f8fafc;}
+  .nom-row{display:flex;align-items:center;justify-content:space-between;gap:12px;
+           font-size:13px;padding:3px 0;color:var(--mut);}
+  .nom-row b{font-size:15px;font-weight:650;color:var(--ink);
+             font-variant-numeric:tabular-nums;letter-spacing:-.01em;}
+  .nom-row.hot b,.nom-row.hot span{color:var(--red);}
+  .nom-note{font-size:11.5px;color:#9aa1ad;margin-top:6px;
+            border-top:1px dashed #e3e8f0;padding-top:6px;}
+  .leg-row{display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;
+           padding-bottom:8px;border-bottom:1px dashed var(--line);}
+  .l-v{max-width:190px;}   /* 腿自己的品种：股指带真代码，ETF 只标准名，别撑太宽 */
+  .prot{background:#fffbeb;border:1px solid #fde68a;border-radius:9px;
+        padding:12px 14px;margin-top:10px;}
+  .prot.alarm{background:#fef2f2;border-color:#fecaca;}
+  .prot h3{margin:0 0 8px;font-size:13px;font-weight:650;}
+  .loading{color:var(--mut);font-size:13px;}
+  .err{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;
+       padding:10px 14px;border-radius:8px;font-size:13px;}
+  .tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:4px;
+       background:#f3f4f6;color:#4b5563;margin-left:6px;}
+  /* 非盘中（休市/午休/盘前）提示：琥珀色，区别于灰底的时间戳 */
+  .tag.off{background:#fef3c7;color:#92400e;}
+  .nav{display:flex;gap:6px;margin:0 0 14px;}
+  .nav a{font-size:13px;text-decoration:none;color:var(--mut);padding:6px 13px;
+         border:1px solid var(--line);border-radius:8px;background:#fff;}
+  .nav a:hover{background:#f9fafb;color:var(--ink);}
+  .nav a.on{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:500;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="nav">
+    <a class="on navpos" href="./option.html">持仓体检</a>
+    <a class="navmig" href="./option-daily.html">卖沽移仓价差（日报）</a>
+    <a class="navexp" href="./option-risk.html">移仓决策台</a>
+    <a class="navent" href="./option-entry.html">入场判断</a>
+  </div>
+
+  <h1>期权持仓体检器</h1>
+  <div class="sub">
+    录入持仓 → 看清「最坏情况亏多少」+「补一张废纸要多少钱」。
+    数据源：中金所官方行情。不预测行情、不自动下单。
+    <span id="clock" class="tag"></span>
+    <span id="mkt" class="tag off" style="display:none"></span>
+  </div>
+
+  <!-- ① 行情 -->
+  <div class="card">
+    <h2>① 行情 <span class="badge" id="src-badge">中金所</span>
+        <span class="badge ok" id="spot-badge"></span></h2>
+    <div class="row">
+      <div class="fld">
+        <label>品种</label>
+        <select id="variety">
+          <option value="IO">IO 沪深300股指期权</option>
+          <option value="HO">HO 上证50股指期权</option>
+          <option value="MO" selected>MO 中证1000股指期权（推荐）</option>
+        </select>
+        <!-- ★ 动态品种由 boot() 从 /api/meta 填充。显示规则（vLabel）：
+             股指期权 = 交易所真代码 + 名称（IO/HO/MO，券商APP里就有）
+             ETF 期权 = 只显示券商标准名（沪深300ETF（沪）），不显示自造码 E300/E500 -->
+      </div>
+      <div class="fld">
+        <label>到期月</label>
+        <select id="month"></select>
+      </div>
+      <div class="fld">
+        <label>剩余自然日 <span style="color:var(--dim);font-weight:400;font-size:11.5px">（自动随到期月变，可手动改）</span></label>
+        <input type="number" id="dte" value="30" min="1" max="400">
+      </div>
+      <button class="ghost" onclick="refreshChain()">刷新行情</button>
+    </div>
+    <div class="hint" id="quote-hint"></div>
+  </div>
+
+  <!-- ② 持仓 -->
+  <div class="card">
+    <h2>② 我的持仓</h2>
+    <div id="legs"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="ghost" onclick="addLeg()">+ 加一条腿</button>
+      <button onclick="analyze()">开始体检</button>
+    </div>
+    <!-- ★ 名义价值提醒（2026-09-29 东哥要）：随输入实时更新，不用点体检 -->
+    <div class="nominal" id="nominalBox" style="display:none">
+      <div class="nom-row">
+        <span>义务仓名义敞口</span>
+        <b id="nomShort">--</b>
+      </div>
+      <div class="nom-row">
+        <span>权利仓名义敞口</span>
+        <b id="nomLong">--</b>
+      </div>
+      <div class="nom-row hot" id="nomPutRow" style="display:none">
+        <span>⚠ 卖沽被行权要接货</span>
+        <b id="nomPutShort">--</b>
+      </div>
+      <div class="nom-note">名义价值 = 行权价 × <span id="multText">100</span> <span id="unitText">元/点</span> × 手数</div>
+    </div>
+    <div class="nom-note" id="warnNote" style="display:none;color:var(--red);font-weight:600;margin-top:8px"></div>
+    <div class="hint">
+      <b>数量填法</b>：卖出填负数（如 -10 = 卖开 10 张），买入填正数。
+      权利金填<b>开仓时的成交价</b>（<span id="premUnit">每点多少钱，如 86.0</span>），没填按 0 算。
+    </div>
+  </div>
+
+  <div id="result"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+// ── 环境适配（本地 / 线上同一份代码）────────────────────────────
+// ⚠️ 不要用 './xxx.html' 切换页面：线上 nginx 给每个短地址写了
+//    `location = /option` 精确匹配，页面在 /option 下时相对链接
+//    会被解析成 /migrate.html → 404。本地没 nginx 看不出来。
+function isLocalPage(){
+  const h = location.hostname;
+  return (h === '127.0.0.1' || h === 'localhost' || h === '');
+}
+/** 页面互链前缀：本地 './'，线上 '/' */
+function navBase(){ return isLocalPage() ? './' : '/'; }
+// ★ 2026-09-30 定稿（东哥拍板）：**本地文件名 = 线上路由名（+ .html 后缀）**，
+//   所以这里不需要任何映射表。
+//     本地 frontend/option.html        ↔ 线上 /option
+//          frontend/option-daily.html  ↔      /option-daily
+//          frontend/option-risk.html   ↔      /option-risk
+//   ⚠️ 之前的坑：本地叫 index/migrate/expiry.html，与路由名对不上，
+//      于是「持仓体检 / 日报 / 移仓决策台」三个链接在本地全是 404。
+//      文件名跟路由名对齐后，两边同一套逻辑、不再有特判。
+/** 页面文件名：本地加 .html，线上直接用短地址 */
+function navFile(name){ return isLocalPage() ? (name + '.html') : name; }
+/** 拼接同站页面链接，如 hrefOf('option-risk') */
+function hrefOf(name){ return navBase() + navFile(name); }
+
+// 线上 nginx: location /optarb_api/ { proxy_pass ...:8104/api/; }
+//   ⚠️ proxy_pass 是「替换」不是「相加」：前端写 /optarb_api/xxx，
+//      绝不能再自带 /api（否则 /optarb_api/api/xxx → 404）。
+function apiBase(){
+  return isLocalPage() ? '/api' : '/optarb_api';
+}
+const API = apiBase();
+function requestUrl(path){
+  let p = path.startsWith('/') ? path : ('/' + path);
+  if (p.startsWith('/api/')) p = p.slice(4);   // 剥掉调用处习惯写的 /api
+  return API + p;
+}
+
+let CHAIN = null;
+let OPTS = [];
+let VARIETIES = {};   // 由 /api/meta 填充
+let MKT = null;       // 由 /api/meta 的 market 字段填充（2026-10-03）
+
+function money(x){
+  if (x === null || x === undefined) return '--';
+  const n = Math.round(x);
+  return n.toLocaleString('zh-CN');
+}
+function pctCls(x){ return x >= 0 ? 'pos' : 'neg'; }   // 中国习惯：正=红
+function vName(v){ return (VARIETIES[v] && VARIETIES[v].name) || (v === 'IO' ? '沪深300' : v === 'HO' ? '上证50' : '中证1000'); }
+/** 界面显示名（2026-09-29 东哥定）：
+ *  股指期权 = 「交易所真代码 + 名称」（如 "IO 沪深300股指期权"）—— 银河APP 里就是这几个代码
+ *  ETF 期权 = 只显示券商标准名（如 "沪深300ETF（沪）"）—— E300/E500 是程序自造码，不上界面 */
+function vLabel(v){
+  const m = VARIETIES[v] || {};
+  const ex = m.exchange || 'CFFEX';
+  const nm = m.name || v;
+  return ex === 'CFFEX' ? (v + ' ' + nm) : nm;
+}
+
+async function get(url){
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 20000);
+  try{
+    const r = await fetch(url, {signal: ctl.signal});
+    clearTimeout(t);
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  }catch(e){
+    clearTimeout(t);
+    return {ok:false, error: e.name === 'AbortError' ? '请求超时' : e.message};
+  }
+}
+
+// ------------------------------------------------ 初始化
+async function boot(){
+  // 导航链接随环境切换：本地 ./option.html，线上 /option
+  // ★ 2026-09-30：三条全部走 hrefOf，不再留静态 href（否则线上会变成 /option.html，
+  //   虽然 200 但与其他两条风格不一致，也依赖 nginx 的 .html 别名兜底）。
+  document.querySelectorAll('.navpos').forEach(a => a.href = hrefOf('option'));
+  document.querySelectorAll('.navmig').forEach(a => a.href = hrefOf('option-daily'));
+  document.querySelectorAll('.navexp').forEach(a => a.href = hrefOf('option-risk'));
+  document.querySelectorAll('.navent').forEach(a => a.href = hrefOf('option-entry'));
+  tick();
+  setInterval(tick, 1000);
+
+  // ★ 先拉品种表，动态填充下拉（支持 ETF 期权 Phase 2c）
+  const meta = await get(requestUrl('/meta'));
+  if(meta.ok && meta.varieties){
+    VARIETIES = meta.varieties;
+    const sel = $('#variety');
+    const cur = sel.value;
+    sel.innerHTML = Object.entries(meta.varieties).map(([k,m]) =>
+      `<option value="${k}" ${k===cur?'selected':''}>${vLabel(k)}</option>`).join('');
+  }
+
+  // ★ 2026-10-03：市场状态提示。
+  //   后端 core/market_calendar.py 会在非盘中把行情缓存 TTL 拉长（周末/假期直接缓存到下次开市），
+  //   所以这里必须明确告诉用户「看到的是最近一次收盘」，避免被误当成实时价。
+  MKT = (meta.ok && meta.market) || null;
+  if(MKT && !MKT.is_live){
+    const el = $('#mkt');
+    el.style.display = '';
+    el.textContent = MKT.label + ' · 显示最近收盘'
+      + (MKT.next_session ? '（下次开市 ' + MKT.next_session + '）' : '');
+  }
+
+  await refreshChain();
+  addLeg(-1, 'C');   // 默认给一条"卖购"，正好是东哥的痛点
+}
+
+function tick(){
+  $('#clock').textContent = new Date().toLocaleString('zh-CN');
+}
+
+async function refreshChain(){
+  const v = $('#variety').value;
+  $('#quote-hint').textContent = '正在拉取 ' + vName(v) + ' 行情…';
+  const d = await get(requestUrl(`/chain?variety=${v}`));
+  if(!d.ok){ $('#quote-hint').innerHTML =
+      '<span class="err">行情获取失败：' + (d.error||'') + '</span>'; return; }
+
+  CHAIN = d;
+  CHAIN_BY_V[v] = d;   // 缓存一份：持仓腿按各自品种取值时要用
+  OPTS = d.options;
+  // 月份下拉
+  const ms = $('#month');
+  const prev = ms.value;
+  ms.innerHTML = d.months.map(m => `<option value="${m}">${m}</option>`).join('');
+  if(prev && d.months.includes(prev)) ms.value = prev;
+  // ★ 自动算剩余自然日（按到期月的实际到期日，不再依赖用户手动填）
+  autoFillDte(v);
+  // ★ 2026-09-29 东哥明确：「① 行情」的品种 与「② 我的持仓」的品种 **不联动**。
+  //   切 ① 只换行情/链，绝不改动 ② 里已录入的持仓（品种 / 到期月 / 行权价一律不动）。
+  updateNominal();   // 仅按新链重算提示与量级校验，不写回任何输入框
+
+  // 现货来源文案：股指=平价反推 / ETF=新浪实时
+  // 非盘中时后端返回的是最近一次收盘，别再标"实时行情"（2026-10-03）
+  const spotSrc = (d.source === 'cffex')
+      ? `${d.spot_samples} 个行权价反推`
+      : ((MKT && !MKT.is_live) ? '最近收盘' : '实时行情');
+  $('#spot-badge').textContent = `标的 ${d.spot ? d.spot.toFixed(2) : '--'}（${spotSrc}）`;
+  // 行情来源标签
+  const exch = (VARIETIES[v] && VARIETIES[v].exchange) || 'CFFEX';
+  $('#src-badge').textContent = exch === 'CFFEX' ? '中金所' : (exch === 'SSE' ? '上交所' : '深交所');
+  $('#quote-hint').textContent =
+      `共 ${d.count} 个合约 · ${d.months.length} 个到期月 · ${d.strikes.length} 档行权价`
+      + (MKT && !MKT.is_live ? `　（${MKT.label}中，以上为最近收盘价）` : '');
+}
+
+// ------------------------------------------------ 持仓
+let legSeq = 0;
+
+/** 单位文案：股指=元/点（乘数 100），ETF=份/张（乘数 10000）。
+ *  ★ 2026-09-29 东哥指出：ETF 的乘数 10000 是「份/张」不是「元/点」，
+ *    权利金也是「每份多少钱」（0.12），不是「每点多少钱」（86.0）。 */
+function unitOf(v){
+  const ex = (VARIETIES[v] && VARIETIES[v].exchange) || 'CFFEX';
+  return ex === 'CFFEX'
+    ? { nom: '元/点', prem: '每点多少钱，如 86.0' }
+    : { nom: '份/张', prem: '每份多少钱，如 0.12' };
+}
+
+/** 某品种的链缓存：持仓腿可以各自选品种，需要按腿的品种拿「到期月/行权价/现价」 */
+const CHAIN_BY_V = {};
+async function ensureChain(v){
+  if(CHAIN_BY_V[v]) return CHAIN_BY_V[v];
+  const d = await get(requestUrl(`/chain?variety=${v}`));
+  if(d && d.ok) CHAIN_BY_V[v] = d;
+  return CHAIN_BY_V[v] || null;
+}
+
+/** 平值行权价：取某条链里最接近标的现价的那一档。取不到返回 null。 */
+function atmStrikeOf(ch){
+  const spot = (ch && ch.spot) ? ch.spot : null;
+  const strikes = (ch && ch.strikes) ? ch.strikes.slice() : [];
+  if(!spot || !strikes.length) return null;
+  strikes.sort((a,b)=>a-b);
+  return strikes.reduce((p,c)=>Math.abs(c-spot)<Math.abs(p-spot)?c:p, strikes[0]);
+}
+
+/** ① 行情当前品种的平值（新建腿时的默认行权价） */
+function atmStrike(){ return atmStrikeOf(CHAIN); }
+
+async function addLeg(qty, cp, strike, premium){
+  const id = 'leg' + (legSeq++);
+  // ★ 2026-09-29 东哥定：每条腿的品种**独立**，不跟「① 行情」联动。
+  //   新建时默认取 ① 的品种（多数情况同品种），之后用户可单独改。
+  const v = $('#variety').value;
+  // ★ 默认填平值：取「这条腿自己的品种」的平值档
+  if(strike === undefined || strike === null || isNaN(strike)){
+    const ch = CHAIN_BY_V[v] || (v === $('#variety').value ? CHAIN : null);
+    const k = atmStrikeOf(ch);
+    if(k !== null) strike = k;
+  }
+  const curMonth = $('#month').value || (CHAIN && CHAIN.months && CHAIN.months[0]) || '';
+  const monthOpts = (CHAIN && CHAIN.months && CHAIN.months.length)
+    ? CHAIN.months.map(m => `<option value="${m}" ${m === curMonth ? 'selected' : ''}>${m}</option>`).join('')
+    : `<option value="${curMonth}">${curMonth}</option>`;
+  // 行权价步长：股指期权 50 点 / ETF 期权 0.05 元
+  const step = (VARIETIES[v] && VARIETIES[v].exchange === 'CFFEX') ? 50 : 0.05;
+  const div = document.createElement('div');
+  div.className = 'leg-row';
+  div.id = id;
+  div.innerHTML = `
+    <div class="fld"><label>品种</label>
+      <select class="l-v">${varietyOpts(v)}</select></div>
+    <div class="fld"><label>到期月</label>
+      <select class="l-m">${monthOpts}</select></div>
+    <div class="fld"><label>方向</label>
+      <select class="l-cp">
+        <option value="C">认购 C</option>
+        <option value="P">认沽 P</option>
+      </select></div>
+    <div class="fld"><label>行权价</label>
+      <input type="number" class="l-k" step="${step}" value="${strike||''}" placeholder="必填"
+             style="width:110px"></div>
+    <div class="fld"><label>数量（负=卖出）</label>
+      <input type="number" class="l-q" value="${qty||-1}" style="width:110px"></div>
+    <div class="fld"><label>开仓权利金</label>
+      <input type="number" class="l-p" step="0.1" value="${premium!==undefined?premium:''}"
+             placeholder="成交价" style="width:110px"></div>
+    <button class="danger" onclick="document.getElementById('${id}').remove();updateNominal()">删</button>
+  `;
+  $('#legs').appendChild(div);
+  if(cp) div.querySelector('.l-cp').value = cp;
+  // 新增/删除/改数字都实时刷新名义价值
+  div.querySelectorAll('input,select').forEach(el=>{
+    el.addEventListener('input', updateNominal);
+    el.addEventListener('change', updateNominal);
+  });
+  // ★ 这条腿自己切品种 → 只动这条腿（刷新到期月 + 行权价重置为该品种平值）
+  const vsel = div.querySelector('.l-v');
+  if(vsel) vsel.addEventListener('change', ()=> onLegVarietyChange(div, vsel.value));
+  updateNominal();
+}
+
+/** 品种下拉选项（显示名走 vLabel：股指带真代码，ETF 只标准名） */
+function varietyOpts(cur){
+  return Object.keys(VARIETIES).map(k =>
+    `<option value="${k}" ${k===cur?'selected':''}>${vLabel(k)}</option>`).join('');
+}
+
+/** 某条腿自己换了品种（2026-09-29 东哥要：腿的品种独立于 ① 行情）
+ *  只影响这条腿：按新品种刷新它的到期月选项，并把行权价重置为该品种的平值。 */
+async function onLegVarietyChange(row, v){
+  const ch = await ensureChain(v);
+  const sel = row.querySelector('.l-m');
+  if(sel && ch && ch.months && ch.months.length){
+    sel.innerHTML = ch.months.map(m => `<option value="${m}">${m}</option>`).join('');
+  }
+  const inp = row.querySelector('.l-k');
+  if(inp){
+    const k = atmStrikeOf(ch);
+    if(k !== null) inp.value = k;
+    inp.step = ((VARIETIES[v] || {}).exchange === 'CFFEX') ? 50 : 0.05;
+  }
+  updateNominal();
+}
+
+
+/** 名义价值实时汇总：行权价 × 该腿品种的合约乘数 × 手数
+ *  义务仓(卖出)=你欠的敞口；权利仓(买入)=你持有的敞口
+ *  ★ 卖沽被行权要真的掏钱接货，单独高亮提醒
+ *  ★ 2026-09-29：各腿品种可不同 → 乘数、单位、档位校验一律按**该腿自己的品种**取 */
+function updateNominal(){
+  const v0 = $('#variety').value;
+  const usedV = [];                       // 各腿实际用到的品种（去重）
+  let shortNom = 0, longNom = 0, putShortNom = 0, any = false, warn = '';
+  document.querySelectorAll('.leg-row').forEach(r=>{
+    const vsel = r.querySelector('.l-v');
+    const lv = (vsel && vsel.value) || v0;
+    if(usedV.indexOf(lv) < 0) usedV.push(lv);
+    const M = (VARIETIES[lv] && VARIETIES[lv].multiplier) || 100;
+    const ch = CHAIN_BY_V[lv] || (lv === v0 ? CHAIN : null);
+    const strikes = (ch && ch.strikes) ? ch.strikes : [];
+    const cp = r.querySelector('.l-cp').value;
+    const k = parseFloat(r.querySelector('.l-k').value);
+    const q = parseInt(r.querySelector('.l-q').value);
+    if(isNaN(k)) return;
+    // ★ 校验：行权价明显超出该腿品种的档位范围 → 提示（东哥 2026-09-29 要）
+    //   典型事故：ETF 品种下填了股指量级的行权价（如 7200），名义敞口直接爆表
+    if(strikes.length){
+      const lo = Math.min.apply(null, strikes);
+      const hi = Math.max.apply(null, strikes);
+      if(k > hi * 1.5 || k < lo * 0.5){
+        warn = `行权价 ${k} 明显超出「${vLabel(lv)}」的档位范围（${lo} ~ ${hi}）。`
+             + `请检查是否填成了别的品种的价位 —— ETF 期权的行权价是 ${lo} 这种小数，不是几千。`;
+      }
+    }
+    if(isNaN(q) || q === 0) return;
+    any = true;
+    const val = k * M * Math.abs(q);
+    if(q < 0){
+      shortNom += val;
+      if(cp === 'P') putShortNom += val;   // 卖沽：被行权要接货
+    }else{
+      longNom += val;
+    }
+  });
+
+  // ★ 单位文案按**腿的品种**走（不再看 ① 行情）：同品种显示该品种乘数，混品种说明「各自品种」
+  const base = usedV[0] || v0;
+  const unit = unitOf(base);
+  const multText = $('#multText');
+  const unitText = $('#unitText');
+  const premUnit = $('#premUnit');
+  if(usedV.length <= 1){
+    if(multText) multText.textContent = (VARIETIES[base] && VARIETIES[base].multiplier) || 100;
+    if(unitText) unitText.textContent = unit.nom;
+  }else{
+    if(multText) multText.textContent = '各自品种';
+    if(unitText) unitText.textContent = '合约乘数';
+  }
+  if(premUnit) premUnit.textContent = unit.prem;
+
+  const warnNote = $('#warnNote');
+  if(warnNote){
+    warnNote.style.display = warn ? 'block' : 'none';
+    warnNote.textContent = warn ? ('⚠ ' + warn) : '';
+  }
+
+  const box = $('#nominalBox');
+  if(!any){ box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  $('#nomShort').textContent = money(shortNom) + ' 元';
+  $('#nomLong').textContent  = money(longNom) + ' 元';
+  const pr = $('#nomPutRow');
+  if(putShortNom > 0){
+    pr.style.display = 'flex';
+    $('#nomPutShort').textContent = money(putShortNom) + ' 元';
+  }else{
+    pr.style.display = 'none';
+  }
+}
+
+function collectLegs(){
+  const out = [];
+  const errs = [];
+  let row = 0;
+  document.querySelectorAll('.leg-row').forEach(r=>{
+    row++;
+    const cp = r.querySelector('.l-cp').value;
+    const k = parseFloat(r.querySelector('.l-k').value);
+    const q = parseInt(r.querySelector('.l-q').value);
+    const p = parseFloat(r.querySelector('.l-p').value);
+    // ★ 明确告诉用户哪一行缺什么，避免「没有持仓」一脸懵
+    if(isNaN(k)){ errs.push(`第 ${row} 行：行权价未填`); return; }
+    if(isNaN(q) || q === 0){ errs.push(`第 ${row} 行：数量为 0 或未填`); return; }
+    const vsel = r.querySelector('.l-v');
+    out.push({cp, strike:k, qty:q, premium: isNaN(p)?0:p,
+              month: r.querySelector('.l-m').value,
+              variety: (vsel && vsel.value) || $('#variety').value});
+  });
+  return { legs: out, err: errs[0] || null };
+}
+
+// ------------------------------------------------ 体检
+async function analyze(){
+  const { legs, err } = collectLegs();
+  if(!legs.length){
+    // ★ 不再弹冰冷的「先加一条持仓腿」，而是指出具体哪一行什么问题
+    $('#result').innerHTML =
+      `<div class="card"><div class="err">测算失败：${err || '请先在「② 我的持仓」里点「+ 加一条腿」并填行权价 + 数量'}</div></div>`;
+    return;
+  }
+  // ★ 各腿品种独立 → 体检的行情链按「第一条腿的品种」取（同品种时就是它本身）
+  const v = legs[0].variety || $('#variety').value;
+  const m = $('#month').value;
+  const dte = $('#dte').value;
+  const param = legs.map(l=>`${l.cp},${l.strike},${l.qty},${l.premium},${l.month},${l.variety}`).join(';');
+
+  $('#result').innerHTML = '<div class="card"><div class="loading">正在测算…</div></div>';
+  const d = await get(requestUrl(`/analyze?variety=${v}&month=${m}&dte=${dte}&legs=${encodeURIComponent(param)}`));
+  if(!d.ok){
+    $('#result').innerHTML = `<div class="card"><div class="err">测算失败：${d.error||''}</div></div>`;
+    return;
+  }
+  render(d);
+}
+
+function render(d){
+  const spot = d.spot;
+  const w = d.worst;
+  const prot = d.protection;
+
+  // ---- 保护状态 ----
+  let protHtml = '';
+  if(prot.naked_calls > 0){
+    protHtml = `<div class="prot alarm">
+      <h3>⚠ 检出 ${prot.naked_calls} 张「裸卖认购」—— 没有废纸保护</h3>
+      <div style="font-size:13px;color:#7f1d1d;margin-bottom:8px">
+        上涨方向<b>没有天花板</b>。下面是三个档位的补保护成本：
+      </div>
+      <table>
+        <tr><th>档位</th><th>买哪张</th><th>单价</th><th>共需</th><th>相对最坏亏损</th></tr>
+        ${prot.ladder.map(l=>`
+          <tr>
+            <td>距现价 +${l.pct}%</td>
+            <td>${l.instrument}</td>
+            <td>${l.ask ?? l.last ?? '--'}</td>
+            <td><b>${money(l.total_cost)} 元</b></td>
+            <td>${w && w.pnl<0 ? (Math.abs(l.total_cost/w.pnl)*100).toFixed(2)+'%' : '--'}</td>
+          </tr>`).join('')}
+      </table>
+      <div class="hint" style="color:#7f1d1d">
+        <b>你自己看这行数字</b>：最便宜那档只要 ${money(prot.ladder.length?prot.ladder[prot.ladder.length-1].total_cost:0)} 元，
+        就能把没有上限的亏损封顶。这就是你当年没花的那笔钱。
+      </div>
+    </div>`;
+  } else {
+    protHtml = `<div class="prot" style="background:#f0fdf4;border-color:#bbf7d0">
+      <h3 style="color:#166534">✓ 认购方向已有保护（或没有裸卖认购）</h3>
+      <div style="font-size:13px;color:#166534">上涨方向的亏损已被封顶。</div>
+    </div>`;
+  }
+
+  // ---- KPI ----
+  const kpi = `
+    <div class="kpis">
+      <div class="kpi"><div class="lab">标的现价（${vName(d.variety)}）</div>
+        <div class="val">${spot.toFixed(2)}</div></div>
+      <div class="kpi"><div class="lab">保证金占用</div>
+        <div class="val">${money(d.margin)} <span style="font-size:13px;color:#6b7280">元</span></div></div>
+      <div class="kpi"><div class="lab">净收权利金</div>
+        <div class="val ${d.net_premium>=0?'pos':'neg'}">${money(d.net_premium)} <span style="font-size:13px">元</span></div></div>
+      <div class="kpi" style="border-color:#fecaca;background:#fef2f2">
+        <div class="lab">最坏情景（${w.pct>0?'涨':'跌'} ${Math.abs(w.pct)}%）</div>
+        <div class="val neg">${money(w.pnl)} <span style="font-size:13px">元</span></div></div>
+    </div>`;
+
+  // ---- 情景表 ----
+  const rows = d.scenarios.map(s=>{
+    const cls = s.pnl < -1 ? 'loss' : (s.pnl > 1 ? 'gain' : '');
+    const zero = Math.abs(s.pct) < 0.01 ? 'zeroline' : '';
+    return `<tr class="${cls} ${zero}">
+      <td>${s.pct>0?'+':''}${s.pct}%</td>
+      <td>${Math.round(s.spot)}</td>
+      <td class="${s.pnl>=0?'pos':'neg'}">${money(s.pnl)}</td>
+      <td>${d.margin? (s.pnl/d.margin*100).toFixed(1)+'%' : '--'}</td>
+    </tr>`;
+  }).join('');
+
+  // ---- 持仓明细 ----
+  const nom = d.nominal || null;
+  const legRows = d.legs.map((l,i)=>{
+    const dir = l.qty>0 ? '买入' : '卖出';
+    // 名义价值：优先用后端算好的（与 legs 一一对应），兜底自己算
+    const mult = d.multiplier || 100;
+    const nv = (nom && nom.per_leg && nom.per_leg[i] != null)
+      ? nom.per_leg[i] : (l.strike * mult * Math.abs(l.qty));
+    return `<tr>
+      <td>${l.instrument || (l.cp+l.strike)}</td>
+      <td>${l.cp==='C'?'认购':'认沽'}</td>
+      <td>${dir} ${Math.abs(l.qty)} 张</td>
+      <td>${money(nv)} 元</td>
+      <td>${l.premium ?? '--'}</td>
+      <td>${l.last ?? '--'}</td>
+      <td>${l.iv ? (l.iv*100).toFixed(1)+'%' : '--'}</td>
+    </tr>`;
+  }).join('');
+
+  // 汇总行（有后端数据才显示）
+  const nomFoot = nom ? `
+    <tr style="background:#f8fafc;font-weight:600">
+      <td colspan="3">合计</td>
+      <td>${money(nom.short + nom.long)} 元</td>
+      <td colspan="3" style="font-weight:400;color:var(--mut);font-size:12px">
+        义务仓 ${money(nom.short)} · 权利仓 ${money(nom.long)}
+        ${nom.put_short > 0 ? ` · <span style="color:var(--red)">卖沽接货 ${money(nom.put_short)}</span>` : ''}
+      </td>
+    </tr>` : '';
+
+  $('#result').innerHTML = `
+    <div class="card"><h2>③ 体检结果 <span class="badge">到期损益口径</span></h2>
+      ${kpi}
+      ${d.mixed_note ? `<div class="hint" style="color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;margin-top:8px">
+        <b>⚠ 多品种持仓</b>：${d.mixed_note}
+      </div>` : ''}
+      <div class="hint">
+        最坏情景是<b>按到期日</b>算的（持有到交割）。保证金按交易所标准公式估算，
+        实际以你券商为准。盈亏单位：元。
+      </div>
+    </div>
+
+    <div class="card"><h2>④ 补"废纸"要多少钱</h2>${protHtml}</div>
+
+    ${d.physical_note ? `<div class="card" style="border-color:#fecaca;background:#fef2f2">
+      <h2 style="color:#991b1b">⚠ ETF 实物交割提示</h2>
+      <div style="color:#7f1d1d;font-size:13px">${d.physical_note}</div>
+    </div>` : ''}
+
+    <div class="card"><h2>⑤ 情景分析 <span class="badge">涨跌到各点位，我会怎样</span></h2>
+      <table>
+        <tr><th>涨跌</th><th>点位</th><th>账户盈亏（元）</th><th>相对保证金</th></tr>
+        ${rows}
+      </table>
+    </div>
+
+    <div class="card"><h2>⑥ 持仓明细</h2>
+      <table>
+        <tr><th>合约</th><th>类型</th><th>方向</th><th>名义价值</th><th>开仓价</th><th>最新价</th><th>隐含波动率</th></tr>
+        ${legRows}
+        ${nomFoot}
+      </table>
+      <div class="hint">名义价值 = 行权价 × ${d.multiplier||100} ${unitOf(d.variety).nom} × 手数。卖沽被行权时，需按行权价准备接货资金。</div>
+      <div class="hint">隐含波动率由最新价反推（Black-Scholes），仅作参考。</div>
+    </div>
+  `;
+
+  // 保护建议里的"相对最坏亏损"用保护档位对照
+  window.__lastReport = d;
+}
+
+$('#variety').addEventListener('change', refreshChain);
+$('#month').addEventListener('change', ()=> autoFillDte($('#variety').value));
+
+/** 按当前品种 + 到期月，自动把"剩余自然日"填上（取后端实际到期日，含假日顺延） */
+async function autoFillDte(variety){
+  const m = $('#month').value;
+  if(!m) return;
+  const r = await get(requestUrl(`/expiry?variety=${variety}&month=${m}`), 8000);
+  if(r && r.ok && Number.isFinite(r.dte)){
+    $('#dte').value = Math.max(r.dte, 1);
+  }
+}
+boot();
+</script>
+</body>
+</html>

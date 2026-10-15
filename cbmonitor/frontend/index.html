@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- 防缓存：确保改版后刷新一定能拿到新的 index.html（进而加载新的 assets）。
+       与 nginx 的 Cache-Control: no-store 形成双保险，部分国产/微信内置浏览器只认 meta。 -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>CBMonitor - 可转债监控</title>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
